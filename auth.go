@@ -5,17 +5,44 @@ import (
 	"time"
 )
 
-// AuthService handles authentication operations
-type AuthService struct {
-	userStore   UserStore
-	tokenStore  TokenStore
-	jwtManager  *JWTManager
-	pwValidator *PasswordValidator
+// LoginRequest merepresentasikan data yang dibutuhkan untuk login.
+type LoginRequest struct {
+	Email    string
+	Password string
 }
 
-// NewAuthService creates a new auth service
+// TokenResponse merepresentasikan respons token setelah login berhasil.
+type TokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+}
+
+// AuthUserStore mendefinisikan interface yang dibutuhkan oleh AuthService
+// untuk berinteraksi dengan penyimpanan data pengguna.
+type AuthUserStore interface {
+	FindByEmail(ctx context.Context, email string) (Authenticatable, error)
+	FindByID(ctx context.Context, id string) (Authenticatable, error)
+	Update(ctx context.Context, user Authenticatable) error
+}
+
+// ClaimsProvider adalah fungsi yang mengembalikan custom claims untuk pengguna.
+// Gunakan ini untuk menyisipkan data tambahan ke dalam JWT (seperti workspace_id, role, dll).
+type ClaimsProvider func(ctx context.Context, user Authenticatable) (map[string]interface{}, error)
+
+// AuthService menangani operasi otentikasi seperti login, register, dan manajemen token.
+type AuthService struct {
+	userStore      AuthUserStore
+	tokenStore     TokenStore
+	jwtManager     *JWTManager
+	pwValidator    *PasswordValidator
+	claimsProvider ClaimsProvider
+}
+
+// NewAuthService membuat instance AuthService baru.
 func NewAuthService(
-	userStore UserStore,
+	userStore AuthUserStore,
 	tokenStore TokenStore,
 	jwtConfig *JWTConfig,
 ) *AuthService {
@@ -27,107 +54,25 @@ func NewAuthService(
 	}
 }
 
-// RegisterRequest represents a registration request
-type RegisterRequest struct {
-	Email    string
-	Name     string
-	Password string
+// WithClaimsProvider mengatur function provider untuk custom claims dan mengembalikan instance service.
+// Method ini menggunakan pola chaining untuk memudahkan konfigurasi.
+func (s *AuthService) WithClaimsProvider(provider ClaimsProvider) *AuthService {
+	s.claimsProvider = provider
+	return s
 }
 
-// LoginRequest represents a login request
-type LoginRequest struct {
-	Email    string
-	Password string
-}
-
-// TokenResponse represents a token response
-type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-}
-
-// Register mendaftarkan pengguna baru dengan validasi email dan password strength.
+// Login mengotentikasi pengguna menggunakan email dan password.
+// Mengembalikan access token dan refresh token jika kredensial valid.
 //
 // Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - email: alamat email pengguna yang akan didaftarkan
-//   - name: nama lengkap pengguna
-//   - password: kata sandi pengguna (harus memenuhi strength requirements)
-//
-// Returns:
-//   - *User: data pengguna yang baru dibuat
-//   - error: error jika validasi gagal, email sudah terdaftar, atau ada error saat create
-//
-// Example:
-//
-//	user, err := authService.Register(ctx, "user@example.com", "John Doe", "SecurePass123!")
-func (s *AuthService) Register(ctx context.Context, email, name, password string) (*User, error) {
-	// Validate input
-	v := NewValidator().
-		Required("email", email).
-		Email("email", email).
-		Required("name", name).
-		Required("password", password)
-
-	if !v.IsValid() {
-		err := NewAppError("Validasi gagal", 400)
-		err.Errors = v.ErrorMap()
-		return nil, err
-	}
-
-	// Validate password strength
-	if err := s.pwValidator.Validate(password); err != nil {
-		return nil, err
-	}
-
-	// Check if email already exists
-	exists, err := s.userStore.Exists(ctx, email)
-	if err != nil {
-		return nil, NewAppError("Gagal memeriksa keberadaan pengguna", 500)
-	}
-
-	if exists {
-		return nil, NewAppError("Email sudah terdaftar", 409).
-			WithFieldError("email", "Email ini sudah terdaftar")
-	}
-
-	// Hash password
-	passwordHash, err := HashPassword(password)
-	if err != nil {
-		return nil, NewAppError("Gagal memproses kata sandi", 500)
-	}
-
-	// Create user
-	user := &User{
-		Email:    email,
-		Name:     name,
-		Password: passwordHash,
-	}
-
-	if err := s.userStore.Create(ctx, user); err != nil {
-		return nil, NewAppError("Gagal membuat pengguna", 500)
-	}
-
-	return user, nil
-}
-
-// Login mengotentikasi pengguna dan mengembalikan access token dan refresh token.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - email: alamat email pengguna
-//   - password: kata sandi pengguna
+//   - ctx: context request
+//   - email: email pengguna
+//   - password: password pengguna
 //
 // Returns:
 //   - string: access token
 //   - string: refresh token
-//   - error: error jika kredensial tidak valid atau ada masalah saat membuat token
-//
-// Example:
-//
-//	accessToken, refreshToken, err := authService.Login(ctx, "user@example.com", "password123")
+//   - error: error jika kredensial tidak valid atau terjadi kesalahan server
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, string, error) {
 	// Validate input
 	v := NewValidator().
@@ -147,73 +92,79 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	}
 
 	// Verify password
-	if err := VerifyPassword(user.Password, password); err != nil {
+	if err := VerifyPassword(user.GetPassword(), password); err != nil {
 		return "", "", NewAppError("Kredensial tidak valid", 401)
 	}
 
-	// Generate tokens
-	accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email)
-	if err != nil {
-		return "", "", NewAppError("Gagal membuat token akses", 500)
+	// Get custom claims
+	var extraClaims map[string]interface{}
+	if s.claimsProvider != nil {
+		var err error
+		extraClaims, err = s.claimsProvider(ctx, user)
+		if err != nil {
+			return "", "", NewAppError("Gagal membuat claims", 500)
+		}
 	}
 
-	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.ID)
+	// Generate tokens
+	accessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), extraClaims)
 	if err != nil {
-		return "", "", NewAppError("Gagal membuat token refresh", 500)
+		return "", "", NewAppError("Gagal membuat access token", 500)
+	}
+
+	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID())
+	if err != nil {
+		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
 
 	// Store refresh token hash
 	refreshTokenHash := GenerateTokenHash(refreshToken)
 	refreshTokenEntity := &RefreshToken{
-		UserID:    user.ID,
+		UserID:    user.GetID(),
 		TokenHash: refreshTokenHash,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
 
 	if err := s.tokenStore.SaveRefreshToken(ctx, refreshTokenEntity); err != nil {
-		return "", "", NewAppError("Gagal menyimpan token refresh", 500)
+		return "", "", NewAppError("Gagal menyimpan refresh token", 500)
 	}
 
 	return accessToken, refreshToken, nil
 }
 
-// RefreshToken merefresh access token menggunakan refresh token yang valid.
-// Membatalkan token lama dan membuat token baru.
+// RefreshToken memperbarui access token menggunakan refresh token yang valid.
+// Method ini akan membatalkan refresh token lama dan mengeluarkan pasangan token baru (Token Rotation).
 //
 // Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - refreshTokenStr: refresh token string yang akan digunakan untuk mendapatkan access token baru
+//   - ctx: context request
+//   - refreshTokenStr: string refresh token yang dikirim oleh client
 //
 // Returns:
 //   - string: access token baru
 //   - string: refresh token baru
-//   - error: error jika token tidak valid, sudah di-revoke, atau kadaluarsa
-//
-// Example:
-//
-//	newAccessToken, newRefreshToken, err := authService.RefreshToken(ctx, oldRefreshToken)
+//   - error: error jika token tidak valid, kadaluarsa, atau sudah dibatalkan
 func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) (string, string, error) {
 	// Verify refresh token
 	userID, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
-		return "", "", NewAppError("Token refresh tidak valid", 401)
+		return "", "", NewAppError("Refresh token tidak valid", 401)
 	}
 
 	// Check if token is in the database and not revoked
 	refreshTokenHash := GenerateTokenHash(refreshTokenStr)
 	storedToken, err := s.tokenStore.FindRefreshToken(ctx, refreshTokenHash)
 	if err != nil {
-		return "", "", NewAppError("Token refresh tidak valid", 401)
+		return "", "", NewAppError("Refresh token tidak valid", 401)
 	}
 
 	// Check if token is revoked
 	if storedToken.RevokedAt != nil {
-		return "", "", NewAppError("Token refresh telah dibatalkan", 401)
+		return "", "", NewAppError("Token telah dibatalkan (revoked)", 401)
 	}
 
 	// Check if token has expired
 	if time.Now().After(storedToken.ExpiresAt) {
-		return "", "", NewAppError("Token refresh telah kadaluarsa", 401)
+		return "", "", NewAppError("Token telah kadaluarsa", 401)
 	}
 
 	// Get user info
@@ -222,16 +173,25 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 		return "", "", NewAppError("Pengguna tidak ditemukan", 404)
 	}
 
+	// Get custom claims
+	var extraClaims map[string]interface{}
+	if s.claimsProvider != nil {
+		extraClaims, err = s.claimsProvider(ctx, user)
+		if err != nil {
+			return "", "", NewAppError("Gagal membuat claims", 500)
+		}
+	}
+
 	// Generate new access token
-	newAccessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Email)
+	newAccessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), extraClaims)
 	if err != nil {
-		return "", "", NewAppError("Gagal membuat token akses", 500)
+		return "", "", NewAppError("Gagal membuat access token", 500)
 	}
 
 	// Generate new refresh token
-	newRefreshToken, err := s.jwtManager.GenerateRefreshToken(user.ID)
+	newRefreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID())
 	if err != nil {
-		return "", "", NewAppError("Gagal membuat token refresh", 500)
+		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
 
 	// Revoke old refresh token
@@ -240,32 +200,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 	// Store new refresh token hash
 	newRefreshTokenHash := GenerateTokenHash(newRefreshToken)
 	newRefreshTokenEntity := &RefreshToken{
-		UserID:    user.ID,
+		UserID:    user.GetID(),
 		TokenHash: newRefreshTokenHash,
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
 
 	if err := s.tokenStore.SaveRefreshToken(ctx, newRefreshTokenEntity); err != nil {
-		return "", "", NewAppError("Gagal menyimpan token refresh baru", 500)
+		return "", "", NewAppError("Gagal menyimpan refresh token", 500)
 	}
 
 	return newAccessToken, newRefreshToken, nil
 }
 
-// RequestPasswordReset membuat request reset password untuk email pengguna.
-// Tidak mengungkapkan apakah email terdaftar atau tidak untuk keamanan.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - email: alamat email pengguna yang ingin melakukan reset password
-//
-// Returns:
-//   - error: error jika ada masalah saat generate token atau menyimpan ke database
-//
-// Example:
-//
-//	err := authService.RequestPasswordReset(ctx, "user@example.com")
-func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
+// RequestPasswordReset memproses permintaan reset password.
+// Akan membuat token reset dan menyimpannya (pengiriman email dilakukan oleh pemanggil).
+// Mengembalikan token reset yang belum di-hash agar bisa dikirim ke user.
+func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) (string, error) {
 	// Validate email
 	v := NewValidator().
 		Required("email", email).
@@ -274,51 +224,39 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) er
 	if !v.IsValid() {
 		err := NewAppError("Validasi gagal", 400)
 		err.Errors = v.ErrorMap()
-		return err
+		return "", err
 	}
 
 	// Find user by email
 	user, err := s.userStore.FindByEmail(ctx, email)
 	if err != nil {
-		// Don't reveal if email exists
-		return nil
+		// Don't reveal if email exists (security best practice)
+		return "", nil
 	}
 
 	// Generate reset token
 	resetToken, err := GenerateSecureToken(32)
 	if err != nil {
-		return NewAppError("Gagal membuat token reset", 500)
+		return "", NewAppError("Gagal membuat token reset", 500)
 	}
 
 	// Store reset token hash
 	resetTokenHash := GenerateTokenHash(resetToken)
 	resetTokenEntity := &PasswordResetToken{
-		UserID:    user.ID,
+		UserID:    user.GetID(),
 		TokenHash: resetTokenHash,
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	}
 
 	if err := s.tokenStore.SavePasswordResetToken(ctx, resetTokenEntity); err != nil {
-		return NewAppError("Gagal menyimpan token reset", 500)
+		return "", NewAppError("Gagal menyimpan token reset", 500)
 	}
 
-	return nil
+	return resetToken, nil
 }
 
-// ResetPassword mereset password pengguna menggunakan reset token yang valid.
-// Membatalkan semua refresh token pengguna untuk keamanan setelah reset.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - resetTokenStr: token reset password yang dikirim via email
-//   - newPassword: password baru yang harus memenuhi strength requirements
-//
-// Returns:
-//   - error: error jika token tidak valid, sudah digunakan, kadaluarsa, atau password tidak memenuhi requirements
-//
-// Example:
-//
-//	err := authService.ResetPassword(ctx, resetToken, "NewSecurePass123!")
+// ResetPassword mereset password pengguna menggunakan token reset yang valid.
+// Setelah berhasil, semua refresh token pengguna akan dihapus untuk alasan keamanan.
 func (s *AuthService) ResetPassword(ctx context.Context, resetTokenStr, newPassword string) error {
 	// Validate input
 	v := NewValidator().
@@ -339,7 +277,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetTokenStr, newPassw
 	resetTokenHash := GenerateTokenHash(resetTokenStr)
 	resetToken, err := s.tokenStore.FindPasswordResetToken(ctx, resetTokenHash)
 	if err != nil {
-		return NewAppError("Token reset tidak valid atau telah kadaluarsa", 400)
+		return NewAppError("Token reset tidak valid atau kadaluarsa", 400)
 	}
 
 	// Check if token is expired
@@ -361,47 +299,37 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetTokenStr, newPassw
 	// Hash new password
 	passwordHash, err := HashPassword(newPassword)
 	if err != nil {
-		return NewAppError("Gagal memproses kata sandi", 500)
+		return NewAppError("Gagal memproses password hash", 500)
 	}
 
 	// Update user password
-	user.Password = passwordHash
+	user.SetPassword(passwordHash)
 	if err := s.userStore.Update(ctx, user); err != nil {
-		return NewAppError("Gagal memperbarui kata sandi", 500)
+		return NewAppError("Gagal memperbarui password", 500)
 	}
 
 	// Mark reset token as used
 	if err := s.tokenStore.MarkPasswordResetUsed(ctx, resetTokenHash); err != nil {
-		return NewAppError("Gagal menandai token reset sebagai sudah digunakan", 500)
+		return NewAppError("Gagal menandai token reset", 500)
 	}
 
 	// Revoke all user's refresh tokens for security
-	_ = s.tokenStore.RevokeAllUserTokens(ctx, user.ID)
+	_ = s.tokenStore.RevokeAllUserTokens(ctx, user.GetID())
 
 	return nil
 }
 
-// Logout mengeluarkan pengguna dengan membatalkan refresh token mereka.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - refreshTokenStr: refresh token yang akan dibatalkan
-//
-// Returns:
-//   - error: error jika ada masalah saat melakukan revoke token
-//
-// Example:
-//
-//	err := authService.Logout(ctx, refreshToken)
+// Logout mengeluarkan pengguna dengan membatalkan (revoke) refresh token mereka.
+// Akses token yang masih hidup tetap valid sampai expired, tetapi tidak dapat diperbarui.
 func (s *AuthService) Logout(ctx context.Context, refreshTokenStr string) error {
 	if refreshTokenStr == "" {
-		return NewAppError("Token refresh diperlukan", 400)
+		return NewAppError("Refresh token diperlukan", 400)
 	}
 
 	// Revoke refresh token
 	refreshTokenHash := GenerateTokenHash(refreshTokenStr)
 	if err := s.tokenStore.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {
-		return NewAppError("Gagal keluar", 500)
+		return NewAppError("Gagal logout", 500)
 	}
 
 	return nil

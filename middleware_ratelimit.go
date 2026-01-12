@@ -93,7 +93,7 @@ func RateLimit(config RateLimitConfig) MiddlewareFunc {
 			// Check user rate limit if authenticated
 			user, ok := GetUser(r)
 			if ok {
-				userKey := fmt.Sprintf("user:%d", user.ID)
+				userKey := fmt.Sprintf("user:%s", user.GetID())
 				if !limiter.CheckUserLimit(userKey) {
 					w.Header().Set("Content-Type", "application/json")
 					w.Header().Set("Retry-After", fmt.Sprintf("%d", int(config.ResetPeriod.Seconds())))

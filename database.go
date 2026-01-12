@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"strings"
 	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
@@ -134,7 +133,7 @@ func (db *PostgresDatabase) Exec(ctx context.Context, query string, args ...inte
 //	rows, err := db.Query(ctx, "SELECT id, email FROM users WHERE id = $1", userID)
 func (db *PostgresDatabase) Query(ctx context.Context, query string, args ...interface{}) (Rows, error) {
 	// Decision tree for routing
-	pool := db.routeReadQuery(ctx, query)
+	pool := db.routeReadQuery(query)
 	rows, err := pool.Query(ctx, query, args...)
 	return rows, err
 }
@@ -154,23 +153,20 @@ func (db *PostgresDatabase) Query(ctx context.Context, query string, args ...int
 //
 //	err := db.QueryRow(ctx, "SELECT email FROM users WHERE id = $1", userID).Scan(&email)
 func (db *PostgresDatabase) QueryRow(ctx context.Context, query string, args ...interface{}) Row {
-	pool := db.routeReadQuery(ctx, query)
+	pool := db.routeReadQuery(query)
 	return pool.QueryRow(ctx, query, args...)
 }
 
 // routeReadQuery determines which pool to use for a read query.
-// It currently defaults to the read pool with round-robin load balancing.
-// The query is checked defensively to ensure it's not a write operation.
-func (db *PostgresDatabase) routeReadQuery(ctx context.Context, query string) *pgxpool.Pool {
-	// Defensively check if this is a write query
-	if strings.HasPrefix(strings.TrimSpace(strings.ToUpper(query)), "INSERT") ||
-		strings.HasPrefix(strings.TrimSpace(strings.ToUpper(query)), "UPDATE") ||
-		strings.HasPrefix(strings.TrimSpace(strings.ToUpper(query)), "DELETE") {
-		return db.writePool
+// It uses a "Whitelist" approach (Default to Write) for maximum safety.
+// Only queries explicitly identified as SAFE READS are routed to the read pool.
+// Everything else (Writes, ambiguous queries, unknown commands) goes to the write pool.
+func (db *PostgresDatabase) routeReadQuery(query string) *pgxpool.Pool {
+	if IsSafeRead(query) {
+		return db.getReadPool()
 	}
 
-	// Default - route to read pool with round-robin
-	return db.getReadPool()
+	return db.writePool
 }
 
 // Begin memulai transaction baru di write connection.

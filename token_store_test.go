@@ -11,7 +11,7 @@ func TestMockTokenStoreSaveRefreshToken(t *testing.T) {
 	ctx := context.Background()
 
 	token := &RefreshToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "hash123",
 		UserAgent: "Mozilla/5.0",
 		IPAddress: "192.168.1.1",
@@ -33,7 +33,7 @@ func TestMockTokenStoreFindRefreshToken(t *testing.T) {
 	ctx := context.Background()
 
 	token := &RefreshToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "hash123",
 		UserAgent: "Mozilla/5.0",
 		IPAddress: "192.168.1.1",
@@ -57,7 +57,7 @@ func TestMockTokenStoreRevokeRefreshToken(t *testing.T) {
 	ctx := context.Background()
 
 	token := &RefreshToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "hash123",
 		UserAgent: "Mozilla/5.0",
 		IPAddress: "192.168.1.1",
@@ -82,7 +82,7 @@ func TestMockTokenStoreRevokeAllUserTokens(t *testing.T) {
 	ctx := context.Background()
 
 	token1 := &RefreshToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "hash1",
 		UserAgent: "Mozilla/5.0",
 		IPAddress: "192.168.1.1",
@@ -90,7 +90,7 @@ func TestMockTokenStoreRevokeAllUserTokens(t *testing.T) {
 	}
 
 	token2 := &RefreshToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "hash2",
 		UserAgent: "Chrome/90.0",
 		IPAddress: "192.168.1.2",
@@ -100,7 +100,7 @@ func TestMockTokenStoreRevokeAllUserTokens(t *testing.T) {
 	store.SaveRefreshToken(ctx, token1)
 	store.SaveRefreshToken(ctx, token2)
 
-	err := store.RevokeAllUserTokens(ctx, 1)
+	err := store.RevokeAllUserTokens(ctx, "1")
 	if err != nil {
 		t.Errorf("RevokeAllUserTokens() error = %v", err)
 	}
@@ -118,7 +118,7 @@ func TestMockTokenStoreSavePasswordResetToken(t *testing.T) {
 	ctx := context.Background()
 
 	token := &PasswordResetToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "reset_hash123",
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	}
@@ -138,7 +138,7 @@ func TestMockTokenStoreFindPasswordResetToken(t *testing.T) {
 	ctx := context.Background()
 
 	token := &PasswordResetToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "reset_hash123",
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	}
@@ -160,7 +160,7 @@ func TestMockTokenStoreMarkPasswordResetUsed(t *testing.T) {
 	ctx := context.Background()
 
 	token := &PasswordResetToken{
-		UserID:    1,
+		UserID:    "1",
 		TokenHash: "reset_hash123",
 		ExpiresAt: time.Now().Add(1 * time.Hour),
 	}

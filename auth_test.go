@@ -2,66 +2,61 @@ package dim
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestRegisterSuccess(t *testing.T) {
-	userStore := NewMockUserStore()
-	tokenStore := NewMockTokenStore()
-	config := &JWTConfig{
-		Secret:             "test-secret",
-		AccessTokenExpiry:  15 * time.Minute,
-		RefreshTokenExpiry: 7 * 24 * time.Hour,
-	}
+// MockUser implements Authenticatable
+type MockUser struct {
+	ID       string
+	Email    string
+	Password string
+}
 
-	service := NewAuthService(userStore, tokenStore, config)
-	ctx := context.Background()
+func (u *MockUser) GetID() string        { return u.ID }
+func (u *MockUser) GetEmail() string     { return u.Email }
+func (u *MockUser) GetPassword() string  { return u.Password }
+func (u *MockUser) SetPassword(p string) { u.Password = p }
 
-	user, err := service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
-	if err != nil {
-		t.Errorf("Register() error = %v", err)
-	}
+// MockUserStore implements AuthUserStore
+type MockUserStore struct {
+	users map[string]*MockUser
+}
 
-	if user.Email != "test@example.com" {
-		t.Errorf("email mismatch")
+func NewMockUserStore() *MockUserStore {
+	return &MockUserStore{
+		users: make(map[string]*MockUser),
 	}
 }
 
-func TestRegisterInvalidEmail(t *testing.T) {
-	userStore := NewMockUserStore()
-	tokenStore := NewMockTokenStore()
-	config := &JWTConfig{
-		Secret:             "test-secret",
-		AccessTokenExpiry:  15 * time.Minute,
-		RefreshTokenExpiry: 7 * 24 * time.Hour,
+func (s *MockUserStore) FindByEmail(ctx context.Context, email string) (Authenticatable, error) {
+	for _, u := range s.users {
+		if u.Email == email {
+			return u, nil
+		}
 	}
-
-	service := NewAuthService(userStore, tokenStore, config)
-	ctx := context.Background()
-
-	_, err := service.Register(ctx, "invalid-email", "Test User", "ValidPass123!")
-	if err == nil {
-		t.Errorf("Register() should fail for invalid email")
-	}
+	return nil, errors.New("user not found")
 }
 
-func TestRegisterWeakPassword(t *testing.T) {
-	userStore := NewMockUserStore()
-	tokenStore := NewMockTokenStore()
-	config := &JWTConfig{
-		Secret:             "test-secret",
-		AccessTokenExpiry:  15 * time.Minute,
-		RefreshTokenExpiry: 7 * 24 * time.Hour,
+func (s *MockUserStore) FindByID(ctx context.Context, id string) (Authenticatable, error) {
+	if u, ok := s.users[id]; ok {
+		return u, nil
 	}
+	return nil, errors.New("user not found")
+}
 
-	service := NewAuthService(userStore, tokenStore, config)
-	ctx := context.Background()
-
-	_, err := service.Register(ctx, "test@example.com", "Test User", "weak")
-	if err == nil {
-		t.Errorf("Register() should fail for weak password")
+func (s *MockUserStore) Update(ctx context.Context, user Authenticatable) error {
+	u, ok := user.(*MockUser)
+	if !ok {
+		return errors.New("invalid user type")
 	}
+	s.users[u.ID] = u
+	return nil
+}
+
+func (s *MockUserStore) AddUser(user *MockUser) {
+	s.users[user.ID] = user
 }
 
 func TestLoginSuccess(t *testing.T) {
@@ -73,11 +68,15 @@ func TestLoginSuccess(t *testing.T) {
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
 
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
 	service := NewAuthService(userStore, tokenStore, config)
 	ctx := context.Background()
-
-	// Register first
-	service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
 
 	// Then login
 	accessToken, refreshToken, err := service.Login(ctx, "test@example.com", "ValidPass123!")
@@ -103,16 +102,19 @@ func TestLoginInvalidPassword(t *testing.T) {
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
 
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
 	service := NewAuthService(userStore, tokenStore, config)
 	ctx := context.Background()
 
-	// Register first
-	service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
-
-	// Try login with wrong password
-	_, _, err := service.Login(ctx, "test@example.com", "WrongPassword123!")
+	_, _, err := service.Login(ctx, "test@example.com", "WrongPass")
 	if err == nil {
-		t.Errorf("Login() should fail with wrong password")
+		t.Errorf("Login() should fail for invalid password")
 	}
 }
 
@@ -125,11 +127,17 @@ func TestRefreshTokenSuccess(t *testing.T) {
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
 
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
 	service := NewAuthService(userStore, tokenStore, config)
 	ctx := context.Background()
 
 	// Register and login
-	service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
 	_, refreshToken, _ := service.Login(ctx, "test@example.com", "ValidPass123!")
 
 	// Refresh token
@@ -156,11 +164,17 @@ func TestLogoutSuccess(t *testing.T) {
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
 
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
 	service := NewAuthService(userStore, tokenStore, config)
 	ctx := context.Background()
 
 	// Register and login
-	service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
 	_, refreshToken, _ := service.Login(ctx, "test@example.com", "ValidPass123!")
 
 	// Logout
@@ -179,15 +193,22 @@ func TestRequestPasswordResetSuccess(t *testing.T) {
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
 
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
 	service := NewAuthService(userStore, tokenStore, config)
 	ctx := context.Background()
 
-	// Register
-	service.Register(ctx, "test@example.com", "Test User", "ValidPass123!")
-
 	// Request password reset
-	err := service.RequestPasswordReset(ctx, "test@example.com")
+	token, err := service.RequestPasswordReset(ctx, "test@example.com")
 	if err != nil {
 		t.Errorf("RequestPasswordReset() error = %v", err)
+	}
+	if token == "" {
+		t.Error("RequestPasswordReset() should return token")
 	}
 }

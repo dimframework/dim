@@ -13,7 +13,7 @@ func TestGenerateAccessToken(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, err := manager.GenerateAccessToken(1, "test@example.com")
+	token, err := manager.GenerateAccessToken("1", "test@example.com", nil)
 	if err != nil {
 		t.Errorf("GenerateAccessToken() error = %v", err)
 	}
@@ -31,19 +31,19 @@ func TestVerifyAccessToken(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, _ := manager.GenerateAccessToken(1, "test@example.com")
+	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
 	claims, err := manager.VerifyToken(token)
 	if err != nil {
 		t.Errorf("VerifyToken() error = %v", err)
 	}
 
-	if claims.UserID != 1 {
-		t.Errorf("UserID = %d, want 1", claims.UserID)
+	if sub, ok := claims["sub"].(string); !ok || sub != "1" {
+		t.Errorf("sub = %v, want 1", claims["sub"])
 	}
 
-	if claims.Email != "test@example.com" {
-		t.Errorf("Email = %s, want test@example.com", claims.Email)
+	if email, ok := claims["email"].(string); !ok || email != "test@example.com" {
+		t.Errorf("email = %v, want test@example.com", claims["email"])
 	}
 }
 
@@ -69,7 +69,7 @@ func TestGenerateRefreshToken(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, err := manager.GenerateRefreshToken(1)
+	token, err := manager.GenerateRefreshToken("1")
 	if err != nil {
 		t.Errorf("GenerateRefreshToken() error = %v", err)
 	}
@@ -87,15 +87,15 @@ func TestVerifyRefreshToken(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, _ := manager.GenerateRefreshToken(1)
+	token, _ := manager.GenerateRefreshToken("1")
 
 	userID, err := manager.VerifyRefreshToken(token)
 	if err != nil {
 		t.Errorf("VerifyRefreshToken() error = %v", err)
 	}
 
-	if userID != 1 {
-		t.Errorf("userID = %d, want 1", userID)
+	if userID != "1" {
+		t.Errorf("userID = %s, want 1", userID)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestGetTokenExpiry(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, _ := manager.GenerateAccessToken(1, "test@example.com")
+	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
 	expiry, err := manager.GetTokenExpiry(token)
 	if err != nil {
@@ -128,7 +128,7 @@ func TestIsTokenExpired(t *testing.T) {
 	}
 	manager := NewJWTManager(config)
 
-	token, _ := manager.GenerateAccessToken(1, "test@example.com")
+	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
 	// Wait for token to expire
 	time.Sleep(10 * time.Millisecond)
@@ -158,7 +158,7 @@ func TestDifferentSecrets(t *testing.T) {
 	}
 	manager2 := NewJWTManager(config2)
 
-	token, _ := manager1.GenerateAccessToken(1, "test@example.com")
+	token, _ := manager1.GenerateAccessToken("1", "test@example.com", nil)
 
 	_, err := manager2.VerifyToken(token)
 	if err == nil {

@@ -7,8 +7,8 @@ import (
 
 func TestSetAndGetUser(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/", nil)
-	user := &User{
-		ID:    1,
+	user := &TokenUser{
+		ID:    "1",
 		Email: "test@example.com",
 	}
 
@@ -19,7 +19,7 @@ func TestSetAndGetUser(t *testing.T) {
 		t.Errorf("GetUser returned false, expected true")
 	}
 
-	if retrieved.ID != user.ID || retrieved.Email != user.Email {
+	if retrieved.GetID() != user.ID || retrieved.GetEmail() != user.Email {
 		t.Errorf("retrieved user mismatch: got %+v, want %+v", retrieved, user)
 	}
 }

@@ -9,7 +9,7 @@ import (
 // RefreshToken represents a refresh token entity
 type RefreshToken struct {
 	ID        int64      `json:"id"`
-	UserID    int64      `json:"user_id"`
+	UserID    string     `json:"user_id"`
 	TokenHash string     `json:"-"`
 	UserAgent string     `json:"user_agent"`
 	IPAddress string     `json:"ip_address"`
@@ -21,7 +21,7 @@ type RefreshToken struct {
 // PasswordResetToken represents a password reset token entity
 type PasswordResetToken struct {
 	ID        int64      `json:"id"`
-	UserID    int64      `json:"user_id"`
+	UserID    string     `json:"user_id"`
 	TokenHash string     `json:"-"`
 	ExpiresAt time.Time  `json:"expires_at"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
@@ -33,7 +33,7 @@ type TokenStore interface {
 	SaveRefreshToken(ctx context.Context, token *RefreshToken) error
 	FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
-	RevokeAllUserTokens(ctx context.Context, userID int64) error
+	RevokeAllUserTokens(ctx context.Context, userID string) error
 
 	SavePasswordResetToken(ctx context.Context, token *PasswordResetToken) error
 	FindPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error)
@@ -161,7 +161,7 @@ func (s *PostgresTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash s
 // Example:
 //
 //	err := tokenStore.RevokeAllUserTokens(ctx, userID)
-func (s *PostgresTokenStore) RevokeAllUserTokens(ctx context.Context, userID int64) error {
+func (s *PostgresTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	err := s.db.Exec(ctx,
 		`UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL`,
 		time.Now(),
@@ -356,7 +356,7 @@ func (s *MockTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash strin
 // Example:
 //
 //	err := mockStore.RevokeAllUserTokens(ctx, userID)
-func (s *MockTokenStore) RevokeAllUserTokens(ctx context.Context, userID int64) error {
+func (s *MockTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	now := time.Now()
 	for _, token := range s.refreshTokens {
 		if token.UserID == userID && token.RevokedAt == nil {

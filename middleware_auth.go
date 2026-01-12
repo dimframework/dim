@@ -1,6 +1,7 @@
 package dim
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -78,10 +79,25 @@ func RequireAuth(jwtManager *JWTManager) MiddlewareFunc {
 				return
 			}
 
+			// Extract UserID from claims
+			var userID string
+			switch v := claims["sub"].(type) {
+			case string:
+				userID = v
+			case float64:
+				userID = fmt.Sprintf("%.0f", v)
+			default:
+				userID = fmt.Sprintf("%v", v)
+			}
+
+			// Extract Email from claims
+			email, _ := claims["email"].(string)
+
 			// Set user in context
-			user := &User{
-				ID:    claims.UserID,
-				Email: claims.Email,
+			user := &TokenUser{
+				ID:     userID,
+				Email:  email,
+				Claims: claims,
 			}
 			r = SetUser(r, user)
 
@@ -114,9 +130,25 @@ func OptionalAuth(jwtManager *JWTManager) MiddlewareFunc {
 				// Try to verify token
 				if claims, err := jwtManager.VerifyToken(token); err == nil {
 					// Token is valid, set user in context
-					user := &User{
-						ID:    claims.UserID,
-						Email: claims.Email,
+
+					// Extract UserID from claims
+					var userID string
+					switch v := claims["sub"].(type) {
+					case string:
+						userID = v
+					case float64:
+						userID = fmt.Sprintf("%.0f", v)
+					default:
+						userID = fmt.Sprintf("%v", v)
+					}
+
+					// Extract Email from claims
+					email, _ := claims["email"].(string)
+
+					user := &TokenUser{
+						ID:     userID,
+						Email:  email,
+						Claims: claims,
 					}
 					r = SetUser(r, user)
 				}

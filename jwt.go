@@ -8,13 +8,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims represents the JWT claims
-type Claims struct {
-	UserID int64  `json:"sub"`
-	Email  string `json:"email"`
-	jwt.RegisteredClaims
-}
-
 // JWTManager handles JWT operations
 type JWTManager struct {
 	secret             string
@@ -42,11 +35,12 @@ func NewJWTManager(config *JWTConfig) *JWTManager {
 }
 
 // GenerateAccessToken membuat access token JWT baru untuk user dengan expiry yang sudah dikonfigurasi.
-// Token berisi userID dan email sebagai claims.
+// Token berisi userID, email, dan claims tambahan.
 //
 // Parameters:
 //   - userID: ID unik dari pengguna
 //   - email: alamat email pengguna
+//   - extraClaims: claims tambahan yang ingin disertakan (opsional)
 //
 // Returns:
 //   - string: signed JWT access token
@@ -54,19 +48,22 @@ func NewJWTManager(config *JWTConfig) *JWTManager {
 //
 // Example:
 //
-//	token, err := manager.GenerateAccessToken(123, "user@example.com")
-func (m *JWTManager) GenerateAccessToken(userID int64, email string) (string, error) {
+//	token, err := manager.GenerateAccessToken("123", "user@example.com", map[string]interface{}{"role": "admin"})
+func (m *JWTManager) GenerateAccessToken(userID string, email string, extraClaims map[string]interface{}) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(m.accessTokenExpiry)
 
-	claims := Claims{
-		UserID: userID,
-		Email:  email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			NotBefore: jwt.NewNumericDate(now),
-		},
+	claims := jwt.MapClaims{
+		"sub":   userID,
+		"email": email,
+		"iat":   now.Unix(),
+		"exp":   expiresAt.Unix(),
+		"nbf":   now.Unix(),
+	}
+
+	// Add extra claims
+	for k, v := range extraClaims {
+		claims[k] = v
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -90,13 +87,13 @@ func (m *JWTManager) GenerateAccessToken(userID int64, email string) (string, er
 //
 // Example:
 //
-//	token, err := manager.GenerateRefreshToken(123)
-func (m *JWTManager) GenerateRefreshToken(userID int64) (string, error) {
+//	token, err := manager.GenerateRefreshToken("123")
+func (m *JWTManager) GenerateRefreshToken(userID string) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(m.refreshTokenExpiry)
 
 	claims := jwt.RegisteredClaims{
-		Subject:   fmt.Sprintf("%d", userID),
+		Subject:   userID,
 		IssuedAt:  jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expiresAt),
 		NotBefore: jwt.NewNumericDate(now),
@@ -118,7 +115,7 @@ func (m *JWTManager) GenerateRefreshToken(userID int64) (string, error) {
 //   - tokenString: JWT token string yang akan diverifikasi
 //
 // Returns:
-//   - *Claims: claims dari token (userID, email, dan registered claims)
+//   - jwt.MapClaims: claims dari token key-value map
 //   - error: error jika token tidak valid, expired, atau signature tidak cocok
 //
 // Example:
@@ -127,8 +124,8 @@ func (m *JWTManager) GenerateRefreshToken(userID int64) (string, error) {
 //	if err != nil {
 //	  return err
 //	}
-func (m *JWTManager) VerifyToken(tokenString string) (*Claims, error) {
-	claims := &Claims{}
+func (m *JWTManager) VerifyToken(tokenString string) (jwt.MapClaims, error) {
+	claims := jwt.MapClaims{}
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -155,13 +152,13 @@ func (m *JWTManager) VerifyToken(tokenString string) (*Claims, error) {
 //   - tokenString: JWT refresh token string yang akan diverifikasi
 //
 // Returns:
-//   - int64: user ID dari subject claim
+//   - string: user ID dari subject claim
 //   - error: error jika token tidak valid, expired, signature tidak cocok, atau parse userID gagal
 //
 // Example:
 //
 //	userID, err := manager.VerifyRefreshToken(tokenString)
-func (m *JWTManager) VerifyRefreshToken(tokenString string) (int64, error) {
+func (m *JWTManager) VerifyRefreshToken(tokenString string) (string, error) {
 	var claims jwt.RegisteredClaims
 
 	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
@@ -172,21 +169,14 @@ func (m *JWTManager) VerifyRefreshToken(tokenString string) (int64, error) {
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse token: %w", err)
+		return "", fmt.Errorf("failed to parse token: %w", err)
 	}
 
 	if !token.Valid {
-		return 0, fmt.Errorf("invalid token")
+		return "", fmt.Errorf("invalid token")
 	}
 
-	// Parse user ID from subject
-	var userID int64
-	_, err = fmt.Sscanf(claims.Subject, "%d", &userID)
-	if err != nil {
-		return 0, fmt.Errorf("invalid user ID in token: %w", err)
-	}
-
-	return userID, nil
+	return claims.Subject, nil
 }
 
 // GetTokenExpiry mengembalikan waktu expiry dari token.
@@ -203,7 +193,7 @@ func (m *JWTManager) VerifyRefreshToken(tokenString string) (int64, error) {
 //
 //	expiryTime, err := manager.GetTokenExpiry(tokenString)
 func (m *JWTManager) GetTokenExpiry(tokenString string) (time.Time, error) {
-	claims := &Claims{}
+	claims := &jwt.RegisteredClaims{}
 
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(m.secret), nil

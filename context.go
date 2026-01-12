@@ -21,16 +21,16 @@ const (
 //
 // Parameters:
 //   - r: *http.Request request yang akan diupdate contextnya
-//   - user: *User object yang akan disimpan
+//   - user: Authenticatable object yang akan disimpan
 //
 // Returns:
 //   - *http.Request: request baru dengan user disimpan di context
 //
 // Example:
 //
-//	req = SetUser(req, &User{ID: 123, Email: "user@example.com"})
+//	req = SetUser(req, user)
 //	user, ok := GetUser(req)
-func SetUser(r *http.Request, user *User) *http.Request {
+func SetUser(r *http.Request, user Authenticatable) *http.Request {
 	ctx := context.WithValue(r.Context(), userKey, user)
 	return r.WithContext(ctx)
 }
@@ -43,7 +43,7 @@ func SetUser(r *http.Request, user *User) *http.Request {
 //   - r: *http.Request request yang di-check contextnya
 //
 // Returns:
-//   - *User: user object dari context, nil jika tidak ada
+//   - Authenticatable: user object dari context, nil jika tidak ada
 //   - bool: true jika user ada, false jika tidak ada
 //
 // Example:
@@ -52,9 +52,31 @@ func SetUser(r *http.Request, user *User) *http.Request {
 //	if !ok {
 //	  return JsonError(w, 401, "Tidak authorized", nil)
 //	}
-func GetUser(r *http.Request) (*User, bool) {
-	user, ok := r.Context().Value(userKey).(*User)
+func GetUser(r *http.Request) (Authenticatable, bool) {
+	user, ok := r.Context().Value(userKey).(Authenticatable)
 	return user, ok
+}
+
+// GetClaims mengambil custom claims dari request context jika user terotentikasi.
+// Memeriksa apakah user mengimplementasikan method GetClaims() map[string]interface{}.
+//
+// Parameters:
+//   - r: *http.Request request yang akan diperiksa
+//
+// Returns:
+//   - map[string]interface{}: map claims, atau nil jika tidak ada atau user tidak punya claims
+func GetClaims(r *http.Request) map[string]interface{} {
+	user, ok := GetUser(r)
+	if !ok {
+		return nil
+	}
+
+	// Check if user has GetClaims method
+	if claimsUser, ok := user.(interface{ GetClaims() map[string]interface{} }); ok {
+		return claimsUser.GetClaims()
+	}
+
+	return nil
 }
 
 // SetRequestID menyimpan unique request ID ke dalam context.

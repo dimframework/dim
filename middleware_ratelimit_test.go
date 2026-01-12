@@ -122,7 +122,7 @@ func TestRateLimitMiddlewareUserLimit(t *testing.T) {
 
 	wrappedHandler := rateLimitMiddleware(handler)
 
-	user := &User{ID: 1, Email: "test@example.com"}
+	user := &TokenUser{ID: "1", Email: "test@example.com"}
 
 	// First two requests should succeed
 	for i := 0; i < 2; i++ {

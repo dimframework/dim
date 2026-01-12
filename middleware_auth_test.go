@@ -74,12 +74,12 @@ func TestRequireAuthValid(t *testing.T) {
 		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager := NewJWTManager(config)
-	token, _ := jwtManager.GenerateAccessToken(1, "test@example.com")
+	token, _ := jwtManager.GenerateAccessToken("1", "test@example.com", nil)
 
 	authMiddleware := RequireAuth(jwtManager)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		user, ok := GetUser(r)
-		if !ok || user.ID != 1 {
+		if !ok || user.GetID() != "1" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -146,11 +146,11 @@ func TestOptionalAuthValidToken(t *testing.T) {
 		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager := NewJWTManager(config)
-	token, _ := jwtManager.GenerateAccessToken(1, "test@example.com")
+	token, _ := jwtManager.GenerateAccessToken("1", "test@example.com", nil)
 	authMiddleware := OptionalAuth(jwtManager)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		user, ok := GetUser(r)
-		if !ok || user.ID != 1 {
+		if !ok || user.GetID() != "1" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

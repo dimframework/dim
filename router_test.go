@@ -205,3 +205,42 @@ func TestNewRouterMiddlewareOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestRouterMethodCaseInsensitive(t *testing.T) {
+	router := NewRouter()
+	called := false
+
+	// Register with lowercase "get" - should be normalized to GET
+	router.Register("get", "/lower", func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(200)
+	}, nil)
+
+	w := httptest.NewRecorder()
+	// Request with uppercase "GET" (standard)
+	r := httptest.NewRequest("GET", "/lower", nil)
+	router.ServeHTTP(w, r)
+
+	if !called {
+		t.Errorf("Router did not handle uppercase Request against lowercase Registration")
+	}
+}
+
+func TestRouterMethodNotAllowed(t *testing.T) {
+	router := NewRouter()
+
+	// Register GET only
+	router.Get("/only-get", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+
+	w := httptest.NewRecorder()
+	// Request POST
+	r := httptest.NewRequest("POST", "/only-get", nil)
+	router.ServeHTTP(w, r)
+
+	// Expect 405
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected 405 Method Not Allowed, got %d", w.Code)
+	}
+}
