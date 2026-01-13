@@ -1,11 +1,26 @@
 package dim
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/atfromhome/goreus/pkg/cache"
 )
+
+// RouteInfo menyimpan informasi metadata tentang route yang terdaftar.
+// Digunakan untuk introspeksi route (route:list command).
+type RouteInfo struct {
+	Method      string   // HTTP method (GET, POST, dll)
+	Path        string   // URL path pattern
+	Handler     string   // Nama handler function
+	Middlewares []string // Daftar nama middleware yang diterapkan
+}
 
 // Router adalah router HTTP utama yang dibangun di atas stdlib http.ServeMux dengan dukungan middleware yang ditingkatkan.
 type Router struct {
@@ -14,6 +29,8 @@ type Router struct {
 	cachedHandler http.Handler
 	initialized   bool
 	lock          sync.RWMutex
+	routes        []RouteInfo                                    // Semua route yang terdaftar
+	routeCache    *cache.InMemoryCache[string, []RouteInfo] // Cache untuk GetRoutes()
 }
 
 // NewRouter membuat instance router baru menggunakan stdlib http.ServeMux.
@@ -64,6 +81,14 @@ func (r *Router) Build() {
 	defer r.lock.Unlock()
 	r.cachedHandler = r.buildHandler()
 	r.initialized = true
+
+	// Cache routes saat build
+	if r.routeCache == nil {
+		r.routeCache = cache.NewInMemoryCache[string, []RouteInfo](10, 5*time.Minute)
+	}
+	routesCopy := make([]RouteInfo, len(r.routes))
+	copy(routesCopy, r.routes)
+	r.routeCache.Set(context.Background(), "all_routes", routesCopy)
 }
 
 // Get mendaftarkan route GET dengan middleware spesifik route opsional.
@@ -315,6 +340,25 @@ func (r *Router) Register(method, path string, handler HandlerFunc, middleware [
 
 	// Register to stdlib mux
 	r.mux.HandleFunc(pattern, finalHandler)
+
+	// Track route info untuk CLI introspection
+	handlerName := getFunctionName(handler)
+	middlewareNames := make([]string, 0, len(middleware))
+	for _, mw := range middleware {
+		middlewareNames = append(middlewareNames, getFunctionName(mw))
+	}
+
+	r.routes = append(r.routes, RouteInfo{
+		Method:      method,
+		Path:        path,
+		Handler:     handlerName,
+		Middlewares: middlewareNames,
+	})
+
+	// Invalidate cache
+	if r.routeCache != nil {
+		r.routeCache.Delete(context.Background(), "all_routes")
+	}
 }
 
 // ServeHTTP mengimplementasikan antarmuka http.Handler untuk menangani permintaan HTTP.
@@ -362,4 +406,90 @@ func (r *Router) buildHandler() http.Handler {
 		return Chain(base, r.middleware...)
 	}
 	return base
+}
+
+// GetRoutes mengembalikan semua route yang terdaftar dengan caching.
+// Thread-safe dan menggunakan in-memory cache untuk performa optimal.
+//
+// Mengembalikan:
+//   - []RouteInfo: copy dari semua route yang terdaftar
+//
+// Contoh:
+//
+//	routes := router.GetRoutes()
+//	for _, route := range routes {
+//	    fmt.Printf("%s %s -> %s\n", route.Method, route.Path, route.Handler)
+//	}
+func (r *Router) GetRoutes() []RouteInfo {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	// Check cache first
+	if r.routeCache != nil {
+		if cached, found := r.routeCache.Get(context.Background(), "all_routes"); found {
+			// Return a copy to prevent external modification
+			cachedCopy := make([]RouteInfo, len(cached))
+			copy(cachedCopy, cached)
+			return cachedCopy
+		}
+	}
+
+	// Initialize cache if nil
+	if r.routeCache == nil {
+		r.lock.RUnlock()
+		r.lock.Lock()
+		// Double-check after acquiring write lock
+		if r.routeCache == nil {
+			r.routeCache = cache.NewInMemoryCache[string, []RouteInfo](10, 5*time.Minute)
+		}
+		r.lock.Unlock()
+		r.lock.RLock()
+	}
+
+	// Make copy to prevent external modification
+	routesCopy := make([]RouteInfo, len(r.routes))
+	copy(routesCopy, r.routes)
+
+	// Store in cache
+	r.routeCache.Set(context.Background(), "all_routes", routesCopy)
+
+	return routesCopy
+}
+
+// getFunctionName mengekstrak nama function dari function pointer menggunakan reflection.
+// Digunakan untuk mendapatkan nama handler dan middleware untuk route introspection.
+func getFunctionName(fn interface{}) string {
+	if fn == nil {
+		return "<nil>"
+	}
+
+	// Get function value
+	fnValue := reflect.ValueOf(fn)
+	if fnValue.Kind() != reflect.Func {
+		return "<invalid>"
+	}
+
+	// Get function pointer
+	fnPtr := fnValue.Pointer()
+	if fnPtr == 0 {
+		return "<nil>"
+	}
+
+	// Get function info
+	fnInfo := runtime.FuncForPC(fnPtr)
+	if fnInfo == nil {
+		return "<unknown>"
+	}
+
+	// Get full name and extract the last part
+	fullName := fnInfo.Name()
+
+	// Format: package.path.FunctionName atau package.path.Type.MethodName
+	// Kita ambil bagian terakhir setelah slash terakhir
+	parts := strings.Split(fullName, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+
+	return fullName
 }

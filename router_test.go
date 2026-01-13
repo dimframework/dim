@@ -244,3 +244,215 @@ func TestRouterMethodNotAllowed(t *testing.T) {
 		t.Errorf("Expected 405 Method Not Allowed, got %d", w.Code)
 	}
 }
+
+// ============================================================================
+// GetRoutes() Tests - CLI Route Introspection
+// ============================================================================
+
+func TestRouter_GetRoutes_Empty(t *testing.T) {
+	router := NewRouter()
+
+	routes := router.GetRoutes()
+
+	if routes == nil {
+		t.Fatal("GetRoutes returned nil")
+	}
+
+	if len(routes) != 0 {
+		t.Errorf("Expected 0 routes, got %d", len(routes))
+	}
+}
+
+func TestRouter_GetRoutes_SingleRoute(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	routes := router.GetRoutes()
+
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route, got %d", len(routes))
+	}
+
+	route := routes[0]
+	if route.Method != "GET" {
+		t.Errorf("Expected method 'GET', got '%s'", route.Method)
+	}
+
+	if route.Path != "/users" {
+		t.Errorf("Expected path '/users', got '%s'", route.Path)
+	}
+
+	if route.Handler == "" {
+		t.Error("Handler name should not be empty")
+	}
+}
+
+func TestRouter_GetRoutes_MultipleRoutes(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+	router.Post("/users", func(w http.ResponseWriter, r *http.Request) {})
+	router.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {})
+
+	routes := router.GetRoutes()
+
+	if len(routes) != 3 {
+		t.Fatalf("Expected 3 routes, got %d", len(routes))
+	}
+
+	// Verify first route
+	if routes[0].Method != "GET" || routes[0].Path != "/users" {
+		t.Errorf("Route 0: got %s %s", routes[0].Method, routes[0].Path)
+	}
+
+	// Verify second route
+	if routes[1].Method != "POST" || routes[1].Path != "/users" {
+		t.Errorf("Route 1: got %s %s", routes[1].Method, routes[1].Path)
+	}
+
+	// Verify third route
+	if routes[2].Method != "GET" || routes[2].Path != "/users/{id}" {
+		t.Errorf("Route 2: got %s %s", routes[2].Method, routes[2].Path)
+	}
+}
+
+func TestRouter_GetRoutes_WithMiddleware(t *testing.T) {
+	router := NewRouter()
+
+	middleware1 := func(next HandlerFunc) HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			next(w, r)
+		}
+	}
+
+	middleware2 := func(next HandlerFunc) HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			next(w, r)
+		}
+	}
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {}, middleware1, middleware2)
+
+	routes := router.GetRoutes()
+
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route, got %d", len(routes))
+	}
+
+	route := routes[0]
+	if len(route.Middlewares) != 2 {
+		t.Fatalf("Expected 2 middlewares, got %d", len(route.Middlewares))
+	}
+
+	// Middleware names should not be empty
+	for i, mw := range route.Middlewares {
+		if mw == "" {
+			t.Errorf("Middleware %d name should not be empty", i)
+		}
+	}
+}
+
+func TestRouter_GetRoutes_NoMiddleware(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	routes := router.GetRoutes()
+
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route, got %d", len(routes))
+	}
+
+	route := routes[0]
+	if len(route.Middlewares) != 0 {
+		t.Errorf("Expected 0 middlewares, got %d", len(route.Middlewares))
+	}
+}
+
+func TestRouter_GetRoutes_AllHTTPMethods(t *testing.T) {
+	router := NewRouter()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+
+	router.Get("/test", handler)
+	router.Post("/test", handler)
+	router.Put("/test", handler)
+	router.Delete("/test", handler)
+	router.Patch("/test", handler)
+	router.Options("/test", handler)
+	router.Head("/test", handler)
+
+	routes := router.GetRoutes()
+
+	expectedMethods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
+	if len(routes) != len(expectedMethods) {
+		t.Fatalf("Expected %d routes, got %d", len(expectedMethods), len(routes))
+	}
+
+	for i, expectedMethod := range expectedMethods {
+		if routes[i].Method != expectedMethod {
+			t.Errorf("Route %d: expected method '%s', got '%s'", i, expectedMethod, routes[i].Method)
+		}
+	}
+}
+
+func TestRouter_GetRoutes_IsolationCopy(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	// Get routes twice
+	routes1 := router.GetRoutes()
+	routes2 := router.GetRoutes()
+
+	// Should be separate copies
+	if len(routes1) != len(routes2) {
+		t.Fatalf("Routes length mismatch: %d vs %d", len(routes1), len(routes2))
+	}
+
+	// Modifying routes1 should not affect routes2
+	routes1[0].Path = "/modified"
+
+	if routes2[0].Path == "/modified" {
+		t.Error("GetRoutes() should return isolated copies, but modification affected second call")
+	}
+}
+
+func TestRouter_GetRoutes_Caching(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	// Build should cache routes
+	router.Build()
+
+	routes := router.GetRoutes()
+
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route after Build(), got %d", len(routes))
+	}
+
+	if routes[0].Method != "GET" || routes[0].Path != "/users" {
+		t.Errorf("Route info incorrect after Build()")
+	}
+}
+
+func TestRouter_GetRoutes_AfterNewRegistration(t *testing.T) {
+	router := NewRouter()
+
+	router.Get("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	routes := router.GetRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route, got %d", len(routes))
+	}
+
+	// Register new route
+	router.Post("/users", func(w http.ResponseWriter, r *http.Request) {})
+
+	routes = router.GetRoutes()
+	if len(routes) != 2 {
+		t.Fatalf("Expected 2 routes after new registration, got %d", len(routes))
+	}
+}
