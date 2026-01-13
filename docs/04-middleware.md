@@ -123,6 +123,66 @@ func myHandler(w http.ResponseWriter, r *http.Request) {
 
 ---
 
+## Rate Limiting Middleware
+
+Melindungi API dari penyalahgunaan dan serangan DDoS dengan membatasi jumlah permintaan per IP dan per pengguna.
+
+### Cara Kerja
+
+Middleware ini melacak jumlah permintaan dalam periode waktu tertentu (reset period). Jika batas terlampaui, server akan mengembalikan respons `429 Too Many Requests` beserta header `Retry-After`.
+
+### Konfigurasi
+
+```go
+config := dim.RateLimitConfig{
+    Enabled:     true,
+    PerIP:       100,           // Maks 100 request per IP
+    PerUser:     200,           // Maks 200 request per user (jika login)
+    ResetPeriod: time.Hour,     // Periode reset counter
+}
+```
+
+### Storage Backends (Pluggable)
+
+Dim mendukung penyimpanan counter rate limit di beberapa backend:
+
+1.  **In-Memory (Default)**
+    *   **Pros**: Sangat cepat, tidak butuh setup tambahan.
+    *   **Cons**: Data hilang saat restart, limit tidak terbagi antar instance (jika horizontal scaling).
+    *   **Use Case**: Single server deployment.
+
+2.  **PostgreSQL**
+    *   **Pros**: Persistent, mendukung multi-instance/cluster (distributed rate limiting).
+    *   **Cons**: Sedikit overhead network database.
+    *   **Tech**: Menggunakan `UNLOGGED` table untuk performa maksimal.
+
+### Penggunaan
+
+**Opsi 1: Default (In-Memory)**
+
+```go
+// Otomatis menggunakan in-memory store
+router.Use(dim.RateLimit(config))
+```
+
+**Opsi 2: Distributed (PostgreSQL)**
+
+```go
+// 1. Setup koneksi DB
+db, _ := dim.NewPostgresDatabase(dbConfig)
+
+// 2. Buat store rate limit
+rateStore := dim.NewPostgresRateLimitStore(db)
+
+// 3. Init schema (buat tabel jika belum ada)
+rateStore.InitSchema(context.Background())
+
+// 4. Gunakan di middleware
+router.Use(dim.RateLimit(config, rateStore))
+```
+
+---
+
 ## Advanced: Middleware Chaining
 
 Dim menyediakan helper canggih untuk mengelola komposisi middleware.
