@@ -1,90 +1,70 @@
 # Autentikasi & JWT di Framework dim
 
-Pelajari cara mengimplementasikan autentikasi JWT yang aman.
+Pelajari cara mengimplementasikan autentikasi JWT yang aman dan standar.
 
 ## Daftar Isi
 
 - [Konsep JWT](#konsep-jwt)
-- [Alur Autentikasi Lengkap](#alur-autentikasi-lengkap)
+- [Konfigurasi](#konfigurasi)
 - [User Registration](#user-registration)
 - [User Login](#user-login)
+- [Melindungi Route](#melindungi-route)
+- [Mengakses Data User](#mengakses-data-user)
 - [Token Refresh](#token-refresh)
-- [Password Reset](#password-reset)
-- [Logout](#logout)
-- [Mengakses Pengguna Terautentikasi](#mengakses-pengguna-terautentikasi)
-- [Melindungi Route (Protected Routes)](#melindungi-route-protected-routes)
-- [JWT Configuration](#jwt-configuration)
-- [Praktik Terbaik Keamanan](#praktik-terbaik-keamanan)
+- [Praktik Terbaik](#praktik-terbaik)
 
 ---
 
 ## Konsep JWT
 
-JWT (JSON Web Token) adalah token stateless untuk autentikasi. Strukturnya terdiri dari `[Header].[Payload].[Signature]`. Payload berisi "claims" seperti ID pengguna (`sub`) dan waktu kedaluwarsa (`exp`), sedangkan signature menjamin integritas data.
+JWT (JSON Web Token) digunakan sebagai token *stateless* untuk autentikasi API. Framework `dim` menyediakan `JWTManager` untuk menangani pembuatan (signing) dan verifikasi token dengan dukungan untuk berbagai algoritma (HS256, RS256, ES256).
 
 ---
 
-## Alur Autentikasi Lengkap
+## Konfigurasi
 
-1.  **Registrasi**: Klien mengirim `email` dan `password`. Server melakukan hash pada password (menggunakan bcrypt) dan menyimpan pengguna baru.
-2.  **Login**: Klien mengirim `email` dan `password`. Server memverifikasi kredensial. Jika berhasil, server membuat *Access Token* (berumur pendek, misal 15 menit) dan *Refresh Token* (berumur panjang, misal 7 hari).
-3.  **Request Terautentikasi**: Klien menyertakan *Access Token* pada header `Authorization: Bearer <token>` di setiap permintaan ke *endpoint* yang dilindungi.
-4.  **Middleware Autentikasi**: Di sisi server, middleware `RequireAuth` memverifikasi token ini. Jika valid, informasi pengguna diekstrak dan disimpan dalam *request context*.
-5.  **Refresh Token**: Ketika *Access Token* kedaluwarsa, klien mengirim *Refresh Token* ke endpoint `/auth/refresh` untuk mendapatkan pasangan token baru.
-6.  **Logout**: Klien mengirim *Refresh Token* ke endpoint `/api/logout` agar server dapat membatalkannya (misalnya, dengan menambahkannya ke *blacklist*).
+### Environment Variables
+
+Pastikan variabel berikut ada di `.env` Anda:
+
+```bash
+JWT_SECRET=rahasia-sangat-panjang-dan-aman-minimal-32-karakter
+JWT_SIGNING_METHOD=HS256
+JWT_ACCESS_TOKEN_EXPIRY=15m
+JWT_REFRESH_TOKEN_EXPIRY=168h
+```
+
+### Inisialisasi JWT Manager
+
+```go
+// Load config
+cfg, _ := dim.LoadConfig()
+
+// Init Manager
+jwtManager, err := dim.NewJWTManager(&cfg.JWT)
+if err != nil {
+    log.Fatal("Gagal init JWT:", err)
+}
+```
 
 ---
 
 ## User Registration
 
-Handler registrasi bertanggung jawab untuk mem-parsing, memvalidasi, dan memanggil service untuk membuat pengguna baru.
+Saat registrasi, Anda biasanya hanya membuat user di database. Token baru dibuat saat login.
 
 ```go
-func registerHandler(authService *dim.AuthService) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Parse request body
-        var req struct {
-            Email    string `json:"email"`
-            Username string `json:"username"`
-            Password string `json:"password"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-            dim.BadRequest(w, "JSON tidak valid", nil)
-            return
-        }
-        
-        // 2. Validate input
-        v := dim.NewValidator()
-        v.Required("email", req.Email).Email("email", req.Email)
-        v.Required("username", req.Username).MinLength("username", req.Username, 3)
-        
-        // Gunakan password validator bawaan
-        if err := dim.ValidatePasswordStrength(req.Password); err != nil {
-            appErr, _ := dim.AsAppError(err)
-            dim.BadRequest(w, appErr.Message, appErr.Errors)
-            return
-        }
-        
-        if !v.IsValid() {
-            dim.BadRequest(w, "Validasi gagal", v.ErrorMap())
-            return
-        }
-        
-        // 3. Panggil service untuk registrasi
-        user, err := authService.Register(r.Context(), req.Email, req.Username, req.Password)
-        if err != nil {
-            // Tangani error dari service (misal, email sudah ada)
-            if appErr, ok := dim.AsAppError(err); ok {
-                 dim.JsonAppError(w, appErr)
-            } else {
-                 dim.InternalServerError(w, "Gagal melakukan registrasi")
-            }
-            return
-        }
-        
-        // 4. Kirim response sukses
-        dim.Created(w, user)
-    }
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+    // 1. Parse & Validate input
+    // ...
+
+    // 2. Hash Password (menggunakan helper dim)
+    hashedPassword, err := dim.HashPassword(req.Password)
+    
+    // 3. Simpan ke database
+    // ...
+    
+    dim.Created(w, user)
 }
 ```
 
@@ -92,185 +72,141 @@ func registerHandler(authService *dim.AuthService) http.HandlerFunc {
 
 ## User Login
 
-Handler login memverifikasi kredensial dan mengembalikan token.
+Handler login memverifikasi password dan menghasilkan token.
 
 ```go
-func loginHandler(authService *dim.AuthService) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        var req struct {
-            Email    string `json:"email"`
-            Password string `json:"password"`
-        }
-        // ... parsing dan validasi ...
-
-        // Panggil service
-        accessToken, refreshToken, err := authService.Login(r.Context(), req.Email, req.Password)
-        if err != nil {
-            dim.Unauthorized(w, "Email atau password salah")
-            return
-        }
-        
-        // Kirim token
-        dim.OK(w, map[string]interface{}{
-            "access_token":  accessToken,
-            "refresh_token": refreshToken,
-            "expires_in":    900,  // 15 menit
-            "token_type":    "Bearer",
-        })
-    }
-}
-```
----
-
-(Bagian Token Refresh, Password Reset, dan Logout disederhanakan untuk keringkasan)
-
----
-
-## Mengakses Pengguna Terautentikasi
-
-Setelah token divalidasi oleh middleware `RequireAuth`, Anda dapat mengakses data pengguna di dalam *handler* menggunakan `dim.GetUser(r)`.
-
-```go
-// Pastikan route ini dilindungi oleh RequireAuth(jwtManager)
-func profileHandler(w http.ResponseWriter, r *http.Request) {
-    // Get user dari context
-    user, ok := dim.GetUser(r)
-    if !ok {
-        // Ini seharusnya tidak terjadi jika middleware diterapkan dengan benar
-        dim.Unauthorized(w, "Unauthorized")
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+    // 1. Verifikasi kredensial user dari DB
+    // ...
+    
+    // 2. Cek Password
+    if !dim.CheckPasswordHash(req.Password, user.PasswordHash) {
+        dim.Unauthorized(w, "Kredensial salah")
         return
     }
-    
-    // Gunakan informasi pengguna
-    dim.OK(w, user)
-})
+
+    // 3. Generate Access Token
+    // Parameter: UserID (string), Email (string), Extra Claims (map atau nil)
+    accessToken, err := jwtManager.GenerateAccessToken(
+        fmt.Sprintf("%d", user.ID), 
+        user.Email, 
+        nil,
+    )
+    if err != nil {
+        dim.InternalServerError(w, "Gagal generate token")
+        return
+    }
+
+    // 4. Generate Refresh Token (Opsional, untuk long-lived session)
+    refreshToken, _ := jwtManager.GenerateRefreshToken(fmt.Sprintf("%d", user.ID))
+
+    // 5. Return Response
+    dim.OK(w, map[string]string{
+        "access_token":  accessToken,
+        "refresh_token": refreshToken,
+        "type":          "Bearer",
+    })
+}
 ```
 
 ---
 
-## Melindungi Route (Protected Routes)
+## Melindungi Route
 
-### Peringatan Kritis: `RequireAuth` vs `ExpectBearerToken`
+Gunakan middleware `dim.RequireAuth` untuk memproteksi endpoint.
 
-Sangat penting untuk menggunakan *middleware* yang tepat:
-
-1.  **`dim.RequireAuth(jwtManager *JWTManager)`**:
-    *   **KEAMANAN**: ✅ **AMAN**. Ini adalah **cara yang benar dan direkomendasikan** untuk melindungi *route*.
-    *   **Fungsi**: Memverifikasi token (tanda tangan, masa berlaku) DAN menempatkan pengguna di *request context*. Gagal jika token tidak valid.
-
-2.  **`dim.ExpectBearerToken()`**:
-    *   **KEAMANAN**: ❌ **TIDAK AMAN JIKA DIGUNAKAN SENDIRI**.
-    *   **Fungsi**: HANYA memeriksa keberadaan header `Authorization: Bearer <token>`. **TIDAK** memverifikasi token. Gunakan hanya untuk kasus lanjutan di mana verifikasi dilakukan manual.
-
-### Melindungi Grup Route (Cara yang Direkomendasikan)
-
-Cara paling umum adalah membuat grup *route* yang memerlukan autentikasi.
+### Basic Protection
 
 ```go
-// main.go
+// Endpoint ini hanya bisa diakses jika header Authorization valid
+router.Get("/profile", profileHandler, dim.RequireAuth(jwtManager))
+```
 
-// 1. Buat JWT Manager dengan konfigurasi Anda
-cfg, _ := dim.LoadConfig()
-jwtManager := dim.NewJWTManager(&cfg.JWT)
+### Group Protection (Recommended)
 
-router := dim.NewRouter()
-
-// Rute publik (tidak perlu login)
-router.Post("/auth/login", loginHandler(authService))
-
-// Rute API yang dilindungi
-// Gunakan RequireAuth untuk keamanan!
+```go
 api := router.Group("/api", dim.RequireAuth(jwtManager))
 
-// Semua rute di dalam grup ini sekarang terlindungi
-api.Get("/profile", profileHandler)
-api.Get("/users", listUsersHandler)
+// Semua route di bawah /api sekarang terlindungi
+api.Get("/users", listUsers)
+api.Post("/posts", createPost)
 ```
 
-### Otentikasi Opsional
+### Optional Authentication
 
-Gunakan `dim.OptionalAuth(jwtManager)` untuk *route* yang dapat diakses publik tetapi memberikan fungsionalitas tambahan jika pengguna login.
+Gunakan `dim.OptionalAuth` jika endpoint bisa diakses publik tapi butuh konteks user jika ada.
 
 ```go
-// Endpoint ini dapat diakses oleh semua orang
-// Tapi akan menampilkan data personal jika user login
-router.Get("/posts/:id", 
-    getPostHandler, // Handler dieksekusi setelah middleware
-    dim.OptionalAuth(jwtManager),
-)
+router.Get("/articles/:id", articleHandler, dim.OptionalAuth(jwtManager))
+```
 
-func getPostHandler(w http.ResponseWriter, r *http.Request) {
-    post := getPublicPost(r.Context())
-    user, authenticated := dim.GetUser(r)
-    
-    if authenticated {
-        // Kirim response dengan data tambahan untuk pengguna yang login
-        post.CanEdit = (post.AuthorID == user.ID)
+---
+
+## Mengakses Data User
+
+Di dalam handler yang terlindungi, ambil data user dari context.
+
+```go
+func profileHandler(w http.ResponseWriter, r *http.Request) {
+    // Ambil user dari context
+    user, ok := dim.GetUser(r)
+    if !ok {
+        dim.Unauthorized(w, "Tidak terautentikasi")
+        return
     }
+
+    // Akses field user
+    fmt.Printf("User ID: %s, Email: %s\n", user.ID, user.Email)
     
-    dim.OK(w, post)
+    // Akses claims tambahan
+    if role, ok := user.Claims["role"]; ok {
+        fmt.Println("Role:", role)
+    }
+
+    dim.OK(w, user)
 }
 ```
 
-### Role-Based Access (Kontrol Akses Berbasis Peran)
+---
 
-Anda dapat dengan mudah membangun *middleware* kustom di atas `RequireAuth` untuk memeriksa peran (*role*) pengguna.
+## Token Refresh
+
+Endpoint untuk memperbarui access token menggunakan refresh token.
 
 ```go
-func requireAdminMiddleware(next dim.HandlerFunc) dim.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        user, ok := dim.GetUser(r)
-        if !ok {
-            dim.Unauthorized(w, "Unauthorized")
-            return
-        }
-        
-        // Asumsikan Anda mengambil detail user dari database
-        appUser, _ := myUserStore.FindByID(r.Context(), user.ID)
-        if appUser.Role != "admin" {
-            dim.Forbidden(w, "Akses ditolak: hanya untuk admin")
-            return
-        }
-        
-        next(w, r)
+func refreshHandler(w http.ResponseWriter, r *http.Request) {
+    // Parse refresh token dari body
+    var req struct {
+        RefreshToken string `json:"refresh_token"`
     }
+    // ... decode json ...
+
+    // Verifikasi Refresh Token
+    userID, err := jwtManager.VerifyRefreshToken(req.RefreshToken)
+    if err != nil {
+        dim.Unauthorized(w, "Refresh token tidak valid")
+        return
+    }
+
+    // Cari user di DB untuk mendapatkan data terbaru (email, dll)
+    user := userStore.FindByID(userID)
+
+    // Generate Access Token BARU
+    newAccessToken, _ := jwtManager.GenerateAccessToken(userID, user.Email, nil)
+
+    dim.OK(w, map[string]string{
+        "access_token": newAccessToken,
+    })
 }
-
-// Penggunaan:
-admin := router.Group("/admin", 
-    dim.RequireAuth(jwtManager), // 1. Pastikan user login & valid
-    requireAdminMiddleware,      // 2. Pastikan user adalah admin
-)
-admin.Delete("/users/:id", deleteUserHandler)
 ```
 
 ---
 
-## JWT Configuration
+## Praktik Terbaik
 
-Konfigurasi JWT diatur melalui variabel lingkungan.
+1.  **HTTPS Wajib**: Jangan kirim token via HTTP biasa.
+2.  **Short-Lived Access Token**: Set expiry pendek (misal 15-30 menit).
+3.  **Secure Storage**: Di sisi client, simpan token seaman mungkin (HttpOnly Cookie disarankan untuk web).
+4.  **Jangan Simpan Data Sensitif di Claims**: Token bisa didecode oleh siapa saja (hanya di-sign, tidak di-encrypt). Jangan taruh password atau data pribadi di claims.
 
-`.env`:
-```bash
-JWT_SECRET=your-super-secret-key-change-in-production
-JWT_ACCESS_TOKEN_EXPIRY=15m
-JWT_REFRESH_TOKEN_EXPIRY=7d
 ```
-
----
-
-## Praktik Terbaik Keamanan
-
-- **Jangan pernah hardcode secrets**. Selalu gunakan variabel lingkungan.
-- **Gunakan HTTPS** di production untuk mengenkripsi token saat transit.
-- **Simpan token dengan aman** di sisi klien, lebih disukai dalam *HttpOnly cookies*.
-- **Implementasikan rotasi refresh token** untuk meningkatkan keamanan.
-- **Validasi signature token** di setiap request.
-- **Implementasikan *blacklist* token** untuk proses logout yang sesungguhnya.
-
----
-
-**Lihat Juga**:
-- [Middleware](04-middleware.md) - Urutan middleware dan keamanan
-- [Validasi](09-validation.md) - Validasi input
-- [Keamanan](14-security.md) - Praktik keamanan lainnya

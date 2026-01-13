@@ -1,144 +1,137 @@
-# Production Deployment Guide untuk Framework dim
+# Deployment
 
-Pelajari cara mendeploy aplikasi framework dim ke production dengan aman dan efisien.
+Panduan untuk mendeploy aplikasi berbasis framework dim ke production.
 
 ## Daftar Isi
 
-- [Pre-deployment Checklist](#pre-deployment-checklist)
-- [Environment Configuration](#environment-configuration)
-- [Database Preparation](#database-preparation)
-- [Build & Compilation](#build--compilation)
-- [Server Setup](#server-setup)
-- [Reverse Proxy Configuration](#reverse-proxy-configuration)
-- [SSL/TLS Setup](#ssltls-setup)
-- [Monitoring & Logging](#monitoring--logging)
-- [Backup & Recovery](#backup--recovery)
-- [Deployment Strategies](#deployment-strategies)
-- [Performance Tuning](#performance-tuning)
-- [Praktik Terbaik](#praktik-terbaik)
+- [Single Binary Deployment](#single-binary-deployment)
+- [Docker Deployment](#docker-deployment)
+- [Environment Variables](#environment-variables)
+- [Graceful Shutdown](#graceful-shutdown)
 
 ---
 
-## Pre-deployment Checklist
+## Single Binary Deployment
 
-Sebelum mendeploy ke production, pastikan:
+Salah satu kekuatan utama Go adalah kemampuan untuk menghasilkan satu file binary statis yang berisi semua kebutuhan aplikasi, termasuk aset frontend (HTML/CSS/JS).
 
-### Kode & Build
+### Menggunakan `embed`
 
-- ✅ Semua tests passing (`go test ./...`)
-- ✅ Tidak ada race conditions (`go test -race ./...`)
-- ✅ Code coverage acceptable (minimal 70%)
-- ✅ Dependencies updated dan secure (`go mod tidy`)
-- ✅ Build berhasil di production environment
-- ✅ No debug logging di production code
-- ✅ Error handling lengkap di semua endpoints
+Framework dim mendukung penuh `embed.FS` untuk routing file statis dan SPA.
 
-### Konfigurasi
+**Struktur Proyek**:
+```
+/
+├── main.go
+├── go.mod
+└── dist/          # Folder hasil build frontend (React/Vue)
+    ├── index.html
+    └── assets/
+        └── style.css
+```
 
-- ✅ Environment variables di-setup di server
-- ✅ Database credentials aman (jangan hardcode)
-- ✅ JWT_SECRET yang kuat dan random
-- ✅ CORS origins yang tepat (jangan wildcard)
-- ✅ Rate limiting configured
-- ✅ Timeouts configured appropriately
+**Kode `main.go`**:
 
-### Database
+```go
+package main
 
-- ✅ Database sudah created di production
-- ✅ Migrations sudah di-run
-- ✅ Database backups configured
-- ✅ Connection pooling configured
-- ✅ Indexes created untuk query yang sering
+import (
+    "embed"
+    "io/fs"
+    "github.com/nuradiyana/dim"
+)
 
-### Keamanan
+//go:embed dist/*
+var distFS embed.FS
 
-- ✅ HTTPS/TLS configured
-- ✅ Security headers set
-- ✅ CSRF protection enabled
-- ✅ Input validation lengkap
-- ✅ No sensitive data di logs
-- ✅ SQL injection protection (parameterized queries)
+func main() {
+    router := dim.NewRouter()
 
-### Monitoring
+    // 1. API Routes
+    router.Group("/api", apiHandler)
 
-- ✅ Logging system configured
-- ✅ Error alerting configured
-- ✅ Performance monitoring setup
-- ✅ Health check endpoint working
-- ✅ Uptime monitoring configured
+    // 2. Setup File System
+    // Sub-root ke folder "dist" agar path dimulai dari root folder tersebut
+    publicFS, _ := fs.Sub(distFS, "dist")
+
+    // 3. Static Files
+    // Melayani file statis seperti /assets/style.css
+    router.Static("/assets/", publicFS)
+
+    // 4. SPA Fallback
+    // Menangani routing frontend (React/Vue)
+    router.SPA(publicFS, "index.html")
+
+    // Start Server
+    dim.StartServer(context.Background(), config, router)
+}
+```
+
+### Build Perintah
+
+```bash
+# Build binary untuk Linux (misal server Ubuntu)
+GOOS=linux GOARCH=amd64 go build -o app-server main.go
+
+# Upload hanya file 'app-server' ke server Anda
+scp app-server user@your-server:/opt/app/
+```
+
+Di server, Anda hanya perlu satu file ini dan file `.env` (opsional). Tidak perlu install Node.js, Nginx, atau dependensi lain.
 
 ---
 
-## Environment Configuration
+## Docker Deployment
 
-### Production Environment Variables
+Jika Anda lebih suka menggunakan container:
 
-Buat file `.env.production` untuk production environment:
+**Dockerfile**:
 
-```bash
-# Server
-SERVER_PORT=8080
-SERVER_READ_TIMEOUT=30s
-SERVER_WRITE_TIMEOUT=30s
+```dockerfile
+# Stage 1: Build Frontend (opsional jika repo menyatu)
+# FROM node:18 AS frontend-builder
+# ... npm run build ...
 
-# Database
-DB_WRITE_HOST=prod-db-primary.example.com
-DB_READ_HOSTS=prod-db-replica1.example.com,prod-db-replica2.example.com
-DB_PORT=5432
-DB_NAME=dim_production
-DB_USER=app_user
-DB_PASSWORD=<strong-random-password>
-DB_MAX_CONNS=25
-DB_SSL_MODE=require
+# Stage 2: Build Backend
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY . .
+# COPY --from=frontend-builder /app/dist ./dist
+RUN CGO_ENABLED=0 GOOS=linux go build -o server .
 
-# JWT
-JWT_SECRET=<very-strong-random-secret-min-32-chars>
-JWT_ACCESS_TOKEN_EXPIRY=15m
-JWT_REFRESH_TOKEN_EXPIRY=168h
+# Stage 3: Final Image
+FROM alpine:latest
+WORKDIR /root/
+COPY --from=builder /app/server .
+COPY .env . 
 
-# CORS
-CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
-CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,PATCH,OPTIONS
-CORS_ALLOWED_HEADERS=Content-Type,Authorization,X-CSRF-Token
-CORS_ALLOW_CREDENTIALS=true
-CORS_MAX_AGE=3600
-
-# CSRF
-CSRF_ENABLED=true
-CSRF_EXEMPT_PATHS=/webhooks/stripe,/webhooks/github
-CSRF_TOKEN_LENGTH=32
-CSRF_COOKIE_NAME=csrf_token
-
-# Rate Limiting
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_PER_IP=100
-RATE_LIMIT_PER_USER=200
-RATE_LIMIT_RESET_PERIOD=1h
-
-# Email
-EMAIL_FROM=noreply@example.com
-```
-
-### Generate Strong Secrets
-
-```bash
-# Generate JWT_SECRET (32 bytes random)
-openssl rand -base64 32
-
-# Generate database password
-openssl rand -base64 24
-```
-
-### Load Environment Variables
-
-```bash
-# Load from .env.production
-export $(cat .env.production | xargs)
-
-# Atau gunakan script
-source .env.production
+EXPOSE 8080
+CMD ["./server"]
 ```
 
 ---
 
-(Sisa dokumen tidak diubah dan dihilangkan untuk keringkasan)
+## Environment Variables
+
+Pastikan variabel berikut diset di server production:
+
+| Variable | Deskripsi | Contoh |
+|----------|-----------|--------|
+| `PORT` | Port aplikasi | `8080` |
+| `DATABASE_URL` | Koneksi DB | `postgres://user:pass@host:5432/db` |
+| `JWT_SECRET` | Secret key (Wajib) | `random-string-panjang` |
+| `ENV` | Environment | `production` |
+
+---
+
+## Graceful Shutdown
+
+Framework dim secara otomatis menangani `SIGINT` dan `SIGTERM`.
+
+Saat Anda me-restart service (misal via `systemd` atau `docker restart`):
+1.  Server berhenti menerima koneksi baru.
+2.  Server menunggu request yang sedang berjalan selesai (hingga batas `ShutdownTimeout`).
+3.  Koneksi database ditutup dengan aman.
+4.  Proses berhenti.
+
+Ini memastikan tidak ada request pengguna yang terputus di tengah jalan saat deployment.
