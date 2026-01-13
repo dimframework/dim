@@ -1,6 +1,7 @@
 package dim
 
 import (
+	"io/fs"
 	"net/http"
 	"strings"
 	"sync"
@@ -168,6 +169,96 @@ func (r *Router) Options(path string, handler HandlerFunc, middleware ...Middlew
 //	router.Head("/users", headHandler)
 func (r *Router) Head(path string, handler HandlerFunc, middleware ...MiddlewareFunc) {
 	r.Register("HEAD", path, handler, middleware)
+}
+
+// Static melayani file statis dari sistem file (lokal atau embed).
+// Secara otomatis menambahkan header keamanan dasar.
+//
+// Parameter:
+//   - prefix: path URL prefix (contoh: "/assets/")
+//   - root: fs.FS interface (gunakan os.DirFS("./public") atau embed.FS)
+//   - middleware: middleware tambahan (opsional)
+func (r *Router) Static(prefix string, root fs.FS, middleware ...MiddlewareFunc) {
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	// Base handler
+	fsServer := http.FileServer(http.FS(root))
+	handler := http.StripPrefix(prefix, fsServer)
+
+	// Default security & caching logic for static assets
+	finalHandler := func(w http.ResponseWriter, req *http.Request) {
+		// Security Headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		
+		// Catatan: Caching strategy untuk static assets biasanya tergantung pada
+		// apakah file memiliki hash di namanya. Kita biarkan default browser/server
+		// atau bisa diatur via middleware tambahan.
+		
+		handler.ServeHTTP(w, req)
+	}
+
+	// Wrap with optional middleware
+	var h http.Handler = http.HandlerFunc(finalHandler)
+	if len(middleware) > 0 {
+		h = Chain(finalHandler, middleware...)
+	}
+
+	r.mux.Handle("GET "+prefix, h)
+}
+
+// SPA (Single Page Application) melayani aplikasi frontend modern dengan fallback ke index.html.
+// Secara otomatis menambahkan header keamanan dan mematikan cache untuk file index agar user selalu mendapat versi terbaru.
+func (r *Router) SPA(root fs.FS, index string, middleware ...MiddlewareFunc) {
+	baseHandler := func(w http.ResponseWriter, req *http.Request) {
+		path := strings.TrimPrefix(req.URL.Path, "/")
+		if path == "" {
+			path = index
+		}
+
+		// Coba buka file
+		f, err := root.Open(path)
+		
+		// Jika file tidak ada atau request adalah direktori, sajikan index.html
+		isDir := false
+		if err == nil {
+			stat, _ := f.Stat()
+			isDir = stat.IsDir()
+			f.Close()
+		}
+
+		if err != nil || isDir {
+			// SPA Fallback: Sajikan index.html
+			indexContent, errRead := fs.ReadFile(root, index)
+			if errRead != nil {
+				http.Error(w, "SPA Index Not Found", http.StatusInternalServerError)
+				return
+			}
+
+			// Security & Anti-Cache Headers untuk index.html
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			
+			w.Write(indexContent)
+			return
+		}
+
+		// Jika file statis biasa (js, css, png), sajikan normal
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.FileServer(http.FS(root)).ServeHTTP(w, req)
+	}
+
+	// Wrap with optional middleware
+	var h http.Handler = http.HandlerFunc(baseHandler)
+	if len(middleware) > 0 {
+		h = Chain(baseHandler, middleware...)
+	}
+
+	r.mux.Handle("GET /{path...}", h)
 }
 
 // Group membuat RouterGroup baru dengan prefix dan middleware.
