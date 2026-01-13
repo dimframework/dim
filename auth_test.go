@@ -63,7 +63,8 @@ func TestLoginSuccess(t *testing.T) {
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
@@ -75,7 +76,10 @@ func TestLoginSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
 	ctx := context.Background()
 
 	// Then login
@@ -97,7 +101,8 @@ func TestLoginInvalidPassword(t *testing.T) {
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
@@ -109,10 +114,13 @@ func TestLoginInvalidPassword(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
 	ctx := context.Background()
 
-	_, _, err := service.Login(ctx, "test@example.com", "WrongPass")
+	_, _, err = service.Login(ctx, "test@example.com", "WrongPass")
 	if err == nil {
 		t.Errorf("Login() should fail for invalid password")
 	}
@@ -122,7 +130,8 @@ func TestRefreshTokenSuccess(t *testing.T) {
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
@@ -134,7 +143,10 @@ func TestRefreshTokenSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
 	ctx := context.Background()
 
 	// Register and login
@@ -159,7 +171,8 @@ func TestLogoutSuccess(t *testing.T) {
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
@@ -171,14 +184,17 @@ func TestLogoutSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
 	ctx := context.Background()
 
 	// Register and login
 	_, refreshToken, _ := service.Login(ctx, "test@example.com", "ValidPass123!")
 
 	// Logout
-	err := service.Logout(ctx, refreshToken)
+	err = service.Logout(ctx, refreshToken)
 	if err != nil {
 		t.Errorf("Logout() error = %v", err)
 	}
@@ -188,7 +204,8 @@ func TestRequestPasswordResetSuccess(t *testing.T) {
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
@@ -200,7 +217,10 @@ func TestRequestPasswordResetSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
 	ctx := context.Background()
 
 	// Request password reset

@@ -2,6 +2,7 @@ package dim
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -45,13 +46,17 @@ func NewAuthService(
 	userStore AuthUserStore,
 	tokenStore TokenStore,
 	jwtConfig *JWTConfig,
-) *AuthService {
+) (*AuthService, error) {
+	jwtManager, err := NewJWTManager(jwtConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init jwt manager: %w", err)
+	}
 	return &AuthService{
 		userStore:   userStore,
 		tokenStore:  tokenStore,
-		jwtManager:  NewJWTManager(jwtConfig),
+		jwtManager:  jwtManager,
 		pwValidator: NewPasswordValidator(),
-	}
+	}, nil
 }
 
 // WithClaimsProvider mengatur function provider untuk custom claims dan mengembalikan instance service.
