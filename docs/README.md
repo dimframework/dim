@@ -8,29 +8,36 @@ Dokumentasi lengkap untuk framework HTTP **dim** - framework ringan dan modern u
 - **[01-Memulai](01-getting-started.md)** - Instalasi dan langkah pertama
 - **[02-Arsitektur](02-architecture.md)** - Desain sistem, router modern, dan database layer
 
-### Fitur Inti
-- **[03-Routing](03-routing.md)** - Routing modern (Go 1.22+), Path Params, dan Static/SPA
-- **[04-Middleware](04-middleware.md)** - Sistem middleware, chaining, dan urutan eksekusi
-- **[05-Autentikasi](05-authentication.md)** - JWT flow, login, register, dan proteksi route
+### Core HTTP Components
+- **[03-Routing](03-routing.md)** - Routing modern (Go 1.22+), Path Params, dan Introspection
+- **[04-Handlers](04-handlers.md)** - Menulis handler, parsing request, dan response
+- **[05-Middleware](05-middleware.md)** - Sistem middleware, chaining, dan urutan eksekusi
+- **[06-Request Context](06-request-context.md)** - Mengakses user dan request ID
+- **[07-Response Helpers](07-response-helpers.md)** - Helper untuk JSON response sukses/gagal
 
-### Data & Konfigurasi
-- **[06-Database](06-database.md)** - PostgreSQL wrapper, Tracer, Masking, dan Read/Write Split
-- **[07-Konfigurasi](07-configuration.md)** - Manajemen environment variables
-- **[08-Error Handling](08-error-handling.md)** - Standar error response JSON
+### Data & Configuration
+- **[08-Database](08-database.md)** - PostgreSQL wrapper, Tracer, Masking, dan Read/Write Split
+- **[09-Migrations](09-migrations.md)** - Manajemen skema database (Migrate/Rollback)
+- **[10-Konfigurasi](10-configuration.md)** - Manajemen environment variables
+- **[11-CLI & Console](11-cli-commands.md)** - Command Line Interface (Serve, Migrate, Route List)
 
-### Utilitas & Support
-- **[09-Validasi](09-validation.md)** - Validasi input
-- **[10-Request Context](10-request-context.md)** - Mengakses user dan request ID
-- **[20-JSON:API](20-jsonapi-features.md)** - Filtering, Pagination, dan Sorting standar JSON:API
-- **[11-Response Helpers](11-response-helpers.md)** - Helper untuk JSON response sukses/gagal
-- **[12-Logging](12-structured-logging.md)** - Structured logging dengan `slog`
-- **[21-File Handling](21-file-handling.md)** - Upload dan validasi file
+### Security & Validation
+- **[12-Autentikasi](12-authentication.md)** - JWT flow, login, register, dan proteksi route
+- **[13-Validasi](13-validation.md)** - Validasi input struct
+- **[14-Error Handling](14-error-handling.md)** - Standar error response JSON
+- **[15-Logging](15-structured-logging.md)** - Structured logging dengan `slog`
+- **[16-Keamanan](16-security.md)** - Best practices (CORS, CSRF, Headers)
 
-### Topik Lanjutan
-- **[13-Migrations](13-migrations.md)** - Manajemen skema database
-- **[14-Keamanan](14-security.md)** - Best practices (CORS, CSRF, Headers)
-- **[15-Testing](15-testing.md)** - Strategi testing handler dan middleware
-- **[17-Deployment](17-deployment.md)** - Single Binary Deployment (Embed) & Docker
+### Advanced Features
+- **[17-File Handling](17-file-handling.md)** - Upload dan validasi file
+- **[18-JSON:API Features](18-jsonapi-features.md)** - Standar JSON:API (Sorting, Pagination)
+- **[19-Query Filtering](19-query-filtering.md)** - Advanced query filtering system
+
+### Lifecycle & Operations
+- **[20-Testing](20-testing.md)** - Strategi testing handler dan middleware
+- **[21-Deployment](21-deployment.md)** - Single Binary Deployment (Embed) & Docker
+- **[22-Troubleshooting](22-troubleshooting.md)** - Solusi masalah umum
+- **[23-API Reference](23-api-reference.md)** - Referensi lengkap API
 
 ---
 
@@ -40,35 +47,39 @@ Dokumentasi lengkap untuk framework HTTP **dim** - framework ringan dan modern u
 Pelajari cara kerja router dan server:
 *   [01-Memulai](01-getting-started.md)
 *   [03-Routing](03-routing.md)
+*   [04-Handlers](04-handlers.md)
 
 ### 2. Membangun API
 Tambahkan logika bisnis dan data:
-*   [06-Database](06-database.md)
-*   [05-Autentikasi](05-authentication.md)
-*   [11-Response Helpers](11-response-helpers.md)
+*   [08-Database](08-database.md)
+*   [12-Autentikasi](12-authentication.md)
+*   [07-Response Helpers](07-response-helpers.md)
 
 ### 3. Production Ready
 Siapkan aplikasi untuk dunia nyata:
-*   [04-Middleware](04-middleware.md) (Keamanan)
-*   [12-Logging](12-structured-logging.md) (Observability)
-*   [17-Deployment](17-deployment.md) (Rilis)
+*   [05-Middleware](05-middleware.md) (Keamanan)
+*   [11-CLI & Console](11-cli-commands.md) (Operasional)
+*   [21-Deployment](21-deployment.md) (Rilis)
 
 ---
 
 ## ⚠️ Fitur Unggulan
 
 ### Database Tracer & Masking
-Framework ini secara otomatis mencatat query database ke log, TETAPI menyembunyikan data sensitif (password, token, email) untuk mencegah kebocoran data. Lihat [06-Database](06-database.md).
+Framework ini secara otomatis mencatat query database ke log, TETAPI menyembunyikan data sensitif (password, token, email) untuk mencegah kebocoran data. Lihat [08-Database](08-database.md).
 
 ### Single Binary Distribution
-Dukungan penuh untuk `embed.FS` memungkinkan Anda membungkus seluruh aplikasi (Backend + Frontend React/Vue + Migrasi SQL) menjadi satu file binary yang mudah didistribusikan. Lihat [17-Deployment](17-deployment.md).
+Dukungan penuh untuk `embed.FS` memungkinkan Anda membungkus seluruh aplikasi (Backend + Frontend React/Vue + Migrasi SQL) menjadi satu file binary yang mudah didistribusikan. Lihat [21-Deployment](21-deployment.md).
+
+### CLI Tooling
+Framework menyertakan built-in CLI untuk memudahkan manajemen database (migrate/rollback) dan debugging routes. Lihat [11-CLI & Console](11-cli-commands.md).
 
 ---
 
 ## 🆘 Butuh Bantuan?
 
 Jika Anda mengalami masalah atau error, cek panduan:
-- [18-Troubleshooting](18-troubleshooting.md)
+- [22-Troubleshooting](22-troubleshooting.md)
 
 ---
 

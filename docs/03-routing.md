@@ -230,6 +230,34 @@ router.Static("/img/", os.DirFS("./img"), func(next dim.HandlerFunc) dim.Handler
 
 ---
 
+## Route Introspection
+
+Framework dim memungkinkan Anda untuk melihat daftar route yang telah didaftarkan, yang sangat berguna untuk debugging.
+
+### Via CLI
+
+Gunakan command built-in untuk melihat semua routes:
+
+```bash
+go run main.go route:list
+```
+
+### Via Code
+
+Anda dapat mengakses metadata route secara programmatik:
+
+```go
+// Pastikan Build() sudah dipanggil
+router.Build()
+
+routes := router.GetRoutes()
+for _, r := range routes {
+    fmt.Printf("%s %s -> %s\n", r.Method, r.Path, r.Handler)
+}
+```
+
+---
+
 ## Ringkasan
 
 - Gunakan `{param}` untuk path parameters.
