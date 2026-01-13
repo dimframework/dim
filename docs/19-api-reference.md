@@ -10,7 +10,8 @@ Dokumentasi API lengkap untuk framework dim.
 - [Response API](#response-api)
 - [Error API](#error-api)
 - [Validation API](#validation-api)
-- [Database API](#database-api)
+- [Database & Migration API](#database--migration-api)
+- [JSON:API (Filter/Sort/Page)](#jsonapi-filter-sort-page)
 - [Password API](#password-api)
 - [File & Upload API](#file-upload-api)
 - [Config & Env API](#config-env-api)
@@ -32,6 +33,10 @@ Membuat instance Router baru.
 - `Patch(path string, handler HandlerFunc, middleware ...MiddlewareFunc)`
 - `Options(path string, handler HandlerFunc, middleware ...MiddlewareFunc)`
 - `Head(path string, handler HandlerFunc, middleware ...MiddlewareFunc)`
+
+### Static & SPA
+- `Static(prefix string, root fs.FS, middleware ...MiddlewareFunc)`: Melayani file statis.
+- `SPA(root fs.FS, index string, middleware ...MiddlewareFunc)`: Melayani Single Page Application dengan fallback.
 
 ### Group
 `func (r *Router) Group(prefix string, middleware ...MiddlewareFunc) *RouterGroup`
@@ -73,41 +78,30 @@ Middleware untuk perlindungan Cross-Site Request Forgery.
 `func OptionalAuth(jwtManager *JWTManager) MiddlewareFunc`
 **Aman & Direkomendasikan.** Secara opsional memverifikasi token JWT.
 
-### ExpectBearerToken
-`func ExpectBearerToken() MiddlewareFunc`
-**Tidak Aman.** Hanya memeriksa keberadaan header `Authorization: Bearer`.
-
-### AllowBearerToken
-`func AllowBearerToken() MiddlewareFunc`
-**Tidak Aman.** Middleware pasif yang tidak melakukan apa-apa.
-
 ### RateLimit
-`func RateLimit(config RateLimitConfig) MiddlewareFunc`
-Middleware untuk pembatasan kecepatan (rate limiting).
+`func RateLimit(config RateLimitConfig, store ...RateLimitStore) MiddlewareFunc`
+Middleware untuk pembatasan kecepatan. Mendukung variadic store (default: InMemory).
+
+### Middleware Helpers
+- `Chain(handler HandlerFunc, middleware ...MiddlewareFunc) HandlerFunc`
+- `ChainMiddleware(middleware ...MiddlewareFunc) MiddlewareFunc`
+- `Compose(middleware ...MiddlewareFunc) MiddlewareFunc`
 
 ---
 
 ## Context API
 
 ### GetUser
-`func GetUser(r *http.Request) (*User, bool)`
+`func GetUser(r *http.Request) (Authenticatable, bool)`
 Mengambil pengguna dari konteks.
 
 ### SetUser
-`func SetUser(r *http.Request, user *User) *http.Request`
+`func SetUser(r *http.Request, user Authenticatable) *http.Request`
 Menyimpan pengguna ke konteks.
 
 ### GetParam
 `func GetParam(r *http.Request, key string) string`
-Mengambil satu parameter jalur.
-
-### GetParams
-`func GetParams(r *http.Request) map[string]string`
-Mengambil semua parameter jalur.
-
-### GetQueryParam
-`func GetQueryParam(r *http.Request, key string) string`
-Mengambil satu parameter kueri.
+Mengambil satu parameter jalur (path).
 
 ### GetQueryParams
 `func GetQueryParams(r *http.Request, keys ...string) map[string]string`
@@ -124,10 +118,6 @@ Mengekstrak token Bearer dari header `Authorization`.
 ### GetRequestID
 `func GetRequestID(r *http.Request) string`
 Mengambil ID permintaan unik dari konteks.
-
-### SetRequestID
-`func SetRequestID(r *http.Request, requestID string) *http.Request`
-Menyimpan ID permintaan unik ke konteks.
 
 ---
 
@@ -151,12 +141,7 @@ Menyimpan ID permintaan unik ke konteks.
 - `NotFound(w, message)`: Mengirim 404 Not Found.
 - `Conflict(w, message, errors)`: Mengirim 409 Conflict.
 - `InternalServerError(w, message)`: Mengirim 500 Internal Server Error.
-
-### Utilitas Header & Cookie
-- `SetStatus(w, status)`: Mengatur kode status HTTP.
-- `SetHeader(w, key, value)`: Mengatur satu header.
-- `SetHeaders(w, headers)`: Mengatur beberapa header.
-- `SetCookie(w, cookie)`: Mengatur cookie.
+- `TooManyRequests(w, retryAfter int)`: Mengirim 429 Too Many Requests dengan header Retry-After.
 
 ---
 
@@ -188,28 +173,50 @@ Membuat validator baru.
 - `Custom(field, fn, value, message)`
 
 ### Validasi Opsional (`JsonNull`)
-- `OptionalEmail(field, value)`
-- `OptionalMinLength(field, value, min)`
-- `OptionalMaxLength(field, value, max)`
-- `OptionalLength(field, value, length)`
-- `OptionalIn(field, value, allowed...)`
-- `OptionalMatches(field, value, pattern)`
-
-### Metode Hasil
-- `IsValid() bool`
-- `Errors() []string`
-- `ErrorMap() map[string]string`
+- `OptionalEmail`, `OptionalMinLength`, `OptionalMaxLength`, `OptionalIn`, dll.
 
 ---
 
-## Database API
+## Database & Migration API
+
+### Database
 - `NewPostgresDatabase(config DatabaseConfig) (*PostgresDatabase, error)`
 - `(db *PostgresDatabase) Query(ctx, query, args...) (Rows, error)`
-- `(db *PostgresDatabase) QueryRow(ctx, query, args...) Row`
 - `(db *PostgresDatabase) Exec(ctx, query, args...) error`
 - `(db *PostgresDatabase) Begin(ctx) (pgx.Tx, error)`
 - `(db *PostgresDatabase) WithTx(ctx, fn) error`
 - `(db *PostgresDatabase) Close()`
+
+### Rate Limit Storage
+- `NewInMemoryRateLimitStore(window time.Duration)`
+- `NewPostgresRateLimitStore(db Database)`
+
+### Migrations
+- `GetFrameworkMigrations() []Migration`: Mendapatkan semua migrasi inti.
+- `GetUserMigrations() []Migration`
+- `GetTokenMigrations() []Migration`
+- `GetRateLimitMigrations() []Migration`
+- `RunMigrations(db, migrations)`: Menjalankan migrasi.
+- `RollbackMigration(db, migration)`: Membatalkan migrasi.
+
+---
+
+## JSON:API (Filter, Sort, Page)
+
+### Filtering
+- `NewFilterParser(r *http.Request) *FilterParser`
+- `(fp) WithMaxValues(max int)`
+- `(fp) WithTimezone(tz *time.Location)`
+- `(fp) Parse(target interface{})`
+- `(fp) HasErrors() bool`
+
+### Pagination
+- `NewPaginationParser(defaultLimit, maxLimit int) *PaginationParser`
+- `(p) Parse(r *http.Request) (*Pagination, error)`
+
+### Sorting
+- `NewSortParser(allowedFields []string) *SortParser`
+- `(p) Parse(r *http.Request) ([]SortField, error)`
 
 ---
 
@@ -244,4 +251,3 @@ Membuat validator baru.
 - `NewLogger(level slog.Level) *Logger`
 - `NewLoggerWithWriter(w io.Writer, level slog.Level) *Logger`
 - `NewTextLogger(level slog.Level) *Logger`
-- `NewTextLoggerWithWriter(w io.Writer, level slog.Level) *Logger`
