@@ -2,6 +2,7 @@ package dim
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"reflect"
@@ -458,6 +459,9 @@ func (r *Router) GetRoutes() []RouteInfo {
 
 // getFunctionName mengekstrak nama function dari function pointer menggunakan reflection.
 // Digunakan untuk mendapatkan nama handler dan middleware untuk route introspection.
+//
+// Note: Function names depend on debug symbols. If binary is stripped with -ldflags="-s -w",
+// function names may not be available and will show as "<stripped>" or memory addresses.
 func getFunctionName(fn interface{}) string {
 	if fn == nil {
 		return "<nil>"
@@ -478,17 +482,36 @@ func getFunctionName(fn interface{}) string {
 	// Get function info
 	fnInfo := runtime.FuncForPC(fnPtr)
 	if fnInfo == nil {
-		return "<unknown>"
+		return "<stripped>"
 	}
 
-	// Get full name and extract the last part
+	// Get full name
 	fullName := fnInfo.Name()
+	if fullName == "" {
+		return "<stripped>"
+	}
 
-	// Format: package.path.FunctionName atau package.path.Type.MethodName
-	// Kita ambil bagian terakhir setelah slash terakhir
-	parts := strings.Split(fullName, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+	// Extract the last part after the last slash (package path)
+	// Format: github.com/user/repo/package.FunctionName
+	lastSlash := strings.LastIndex(fullName, "/")
+	if lastSlash >= 0 {
+		fullName = fullName[lastSlash+1:]
+	}
+
+	// Check if this is an anonymous function
+	// Pattern: package.Type.MethodName.func1 or package.FunctionName.func1
+	if strings.Contains(fullName, ".func") {
+		// Extract the parent function/type name before .func
+		parts := strings.Split(fullName, ".func")
+		if len(parts) > 0 && parts[0] != "" {
+			// Get the last meaningful part before .func
+			nameParts := strings.Split(parts[0], ".")
+			if len(nameParts) > 0 {
+				parentName := nameParts[len(nameParts)-1]
+				return fmt.Sprintf("<anonymous in %s>", parentName)
+			}
+		}
+		return "<anonymous>"
 	}
 
 	return fullName

@@ -355,3 +355,43 @@ func TestHasHelpFlag_EmptyArgs(t *testing.T) {
 		t.Error("Expected hasHelpFlag to return false for empty args")
 	}
 }
+
+// ============================================================================
+// Tests for IO Injection
+// ============================================================================
+
+func TestConsole_SetOutput(t *testing.T) {
+	console := NewConsole(nil, nil, nil)
+
+	// Create custom writers
+	var outBuf, errBuf strings.Builder
+
+	// Set custom output
+	console.SetOutput(&outBuf, &errBuf)
+
+	if console.out != &outBuf {
+		t.Error("Expected out to be set to custom writer")
+	}
+
+	if console.err != &errBuf {
+		t.Error("Expected err to be set to custom writer")
+	}
+}
+
+func TestConsole_SetOutput_NilHandling(t *testing.T) {
+	console := NewConsole(nil, nil, nil)
+
+	originalOut := console.out
+	originalErr := console.err
+
+	// Set nil writers should not change
+	console.SetOutput(nil, nil)
+
+	if console.out != originalOut {
+		t.Error("Expected out to remain unchanged when nil")
+	}
+
+	if console.err != originalErr {
+		t.Error("Expected err to remain unchanged when nil")
+	}
+}

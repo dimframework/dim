@@ -2,6 +2,7 @@ package dim
 
 import (
 	"fmt"
+	"os"
 	"sort"
 )
 
@@ -19,10 +20,16 @@ func (c *HelpCommand) Description() string {
 }
 
 func (c *HelpCommand) Execute(ctx *CommandContext) error {
-	fmt.Println("Dim Framework CLI")
-	fmt.Println()
-	fmt.Println("Available commands:")
-	fmt.Println()
+	// Use injected output writer (for testing) or default to stdout
+	out := ctx.Out
+	if out == nil {
+		out = os.Stdout
+	}
+
+	fmt.Fprintln(out, "Dim Framework CLI")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Available commands:")
+	fmt.Fprintln(out)
 
 	// Find longest command name for alignment
 	maxLen := 0
@@ -37,7 +44,7 @@ func (c *HelpCommand) Execute(ctx *CommandContext) error {
 
 	for _, name := range commandOrder {
 		if cmd, exists := c.console.commands[name]; exists {
-			fmt.Printf("  %-*s  %s\n", maxLen, name, cmd.Description())
+			fmt.Fprintf(out, "  %-*s  %s\n", maxLen, name, cmd.Description())
 		}
 	}
 
@@ -63,11 +70,11 @@ func (c *HelpCommand) Execute(ctx *CommandContext) error {
 	// Display sorted custom commands
 	for _, name := range customCommands {
 		cmd := c.console.commands[name]
-		fmt.Printf("  %-*s  %s\n", maxLen, name, cmd.Description())
+		fmt.Fprintf(out, "  %-*s  %s\n", maxLen, name, cmd.Description())
 	}
 
-	fmt.Println()
-	fmt.Println("Use '<command> -h' for more information about a command.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Use '<command> -h' for more information about a command.")
 
 	return nil
 }

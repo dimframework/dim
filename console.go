@@ -3,6 +3,7 @@ package dim
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -41,6 +42,14 @@ type CommandContext struct {
 
 	// Config adalah application configuration
 	Config *Config
+
+	// Out adalah output writer untuk stdout (default: os.Stdout)
+	// Digunakan untuk normal output dan testing
+	Out io.Writer
+
+	// Err adalah output writer untuk stderr (default: os.Stderr)
+	// Digunakan untuk error messages dan warnings
+	Err io.Writer
 }
 
 // Console adalah registry dan executor untuk CLI commands.
@@ -50,6 +59,8 @@ type Console struct {
 	db       *PostgresDatabase
 	router   *Router
 	config   *Config
+	out      io.Writer // Output writer (default: os.Stdout)
+	err      io.Writer // Error writer (default: os.Stderr)
 }
 
 // NewConsole membuat instance Console baru dengan dependencies yang diperlukan.
@@ -73,6 +84,19 @@ func NewConsole(db *PostgresDatabase, router *Router, config *Config) *Console {
 		db:       db,
 		router:   router,
 		config:   config,
+		out:      os.Stdout,
+		err:      os.Stderr,
+	}
+}
+
+// SetOutput sets custom output writers for testing purposes.
+// If out or err is nil, it will use os.Stdout or os.Stderr respectively.
+func (c *Console) SetOutput(out, err io.Writer) {
+	if out != nil {
+		c.out = out
+	}
+	if err != nil {
+		c.err = err
 	}
 }
 
@@ -150,17 +174,22 @@ func (c *Console) Run(args []string) error {
 		DB:     c.db,
 		Router: c.router,
 		Config: c.config,
+		Out:    c.out,
+		Err:    c.err,
 	}
 
 	// Check if command implements FlaggedCommand
 	if flaggedCmd, ok := cmd.(FlaggedCommand); ok {
 		fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 
+		// Set output for flag errors
+		fs.SetOutput(c.err)
+
 		// Customize usage output
 		fs.Usage = func() {
-			fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", cmdName)
-			fmt.Fprintf(os.Stderr, "%s\n\n", cmd.Description())
-			fmt.Fprintf(os.Stderr, "Options:\n")
+			fmt.Fprintf(c.err, "Usage: %s [options]\n\n", cmdName)
+			fmt.Fprintf(c.err, "%s\n\n", cmd.Description())
+			fmt.Fprintf(c.err, "Options:\n")
 			fs.PrintDefaults()
 		}
 
@@ -180,7 +209,7 @@ func (c *Console) Run(args []string) error {
 	} else {
 		// Command doesn't have flags, check for help request
 		if hasHelpFlag(cmdArgs) {
-			printSimpleHelp(cmdName, cmd.Description())
+			printSimpleHelp(c.err, cmdName, cmd.Description())
 			return nil
 		}
 	}
@@ -199,9 +228,9 @@ func hasHelpFlag(args []string) bool {
 }
 
 // printSimpleHelp prints help message for non-flagged commands
-func printSimpleHelp(cmdName, description string) {
-	fmt.Fprintf(os.Stderr, "Usage: %s\n\n", cmdName)
-	fmt.Fprintf(os.Stderr, "%s\n\n", description)
-	fmt.Fprintf(os.Stderr, "This command does not accept any flags.\n")
-	fmt.Fprintf(os.Stderr, "Run 'help' to see all available commands.\n")
+func printSimpleHelp(w io.Writer, cmdName, description string) {
+	fmt.Fprintf(w, "Usage: %s\n\n", cmdName)
+	fmt.Fprintf(w, "%s\n\n", description)
+	fmt.Fprintf(w, "This command does not accept any flags.\n")
+	fmt.Fprintf(w, "Run 'help' to see all available commands.\n")
 }

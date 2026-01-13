@@ -28,6 +28,14 @@ func (c *RouteListCommand) Execute(ctx *CommandContext) error {
 		return nil
 	}
 
+	// Count stripped handlers for warning
+	strippedCount := 0
+	for _, route := range routes {
+		if route.Handler == "<stripped>" || strings.Contains(route.Handler, "<stripped>") {
+			strippedCount++
+		}
+	}
+
 	fmt.Printf("Registered Routes (%d total):\n\n", len(routes))
 
 	for _, route := range routes {
@@ -43,6 +51,14 @@ func (c *RouteListCommand) Execute(ctx *CommandContext) error {
 			route.Handler,
 			middlewareStr,
 		)
+	}
+
+	// Display warning if binary is stripped
+	if strippedCount > 0 {
+		fmt.Println()
+		fmt.Printf("⚠ Warning: %d route(s) show <stripped> handlers.\n", strippedCount)
+		fmt.Println("This happens when the binary is compiled with -ldflags=\"-s -w\"")
+		fmt.Println("To see handler names, compile without stripping debug symbols.")
 	}
 
 	return nil
