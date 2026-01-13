@@ -35,9 +35,10 @@ type Database interface {
 // PostgresDatabase is the PostgreSQL implementation of Database interface
 // It supports read/write connection splitting with load balancing on read connections
 type PostgresDatabase struct {
-	writePool *pgxpool.Pool
-	readPools []*pgxpool.Pool
-	readIndex atomic.Uint32
+	writePool   *pgxpool.Pool
+	readPools   []*pgxpool.Pool
+	readIndex   atomic.Uint32
+	hookManager *hookManager
 }
 
 // NewPostgresDatabase membuat koneksi database PostgreSQL baru dengan mendukung read/write splitting.
@@ -58,9 +59,14 @@ type PostgresDatabase struct {
 //	  log.Fatal(err)
 //	}
 func NewPostgresDatabase(config DatabaseConfig) (*PostgresDatabase, error) {
+	// Initialize hook manager
+	hm := &hookManager{
+		hooks: make([]QueryHook, 0),
+	}
+
 	// Create write connection pool
 	writeConnString := formatConnectionString(config.WriteHost, config.Port, config.Database, config.Username, config.Password, config.SSLMode)
-	writePool, err := createConnectionPool(writeConnString, config.MaxConns, config.RuntimeParams, config.QueryExecMode)
+	writePool, err := createConnectionPool(writeConnString, config.MaxConns, config.RuntimeParams, config.QueryExecMode, hm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create write connection pool: %w", err)
 	}
@@ -70,7 +76,7 @@ func NewPostgresDatabase(config DatabaseConfig) (*PostgresDatabase, error) {
 	if len(config.ReadHosts) > 0 {
 		for _, host := range config.ReadHosts {
 			readConnString := formatConnectionString(host, config.Port, config.Database, config.Username, config.Password, config.SSLMode)
-			readPool, err := createConnectionPool(readConnString, config.MaxConns, config.RuntimeParams, config.QueryExecMode)
+			readPool, err := createConnectionPool(readConnString, config.MaxConns, config.RuntimeParams, config.QueryExecMode, hm)
 			if err != nil {
 				// Close previously created pools on error
 				writePool.Close()
@@ -87,10 +93,17 @@ func NewPostgresDatabase(config DatabaseConfig) (*PostgresDatabase, error) {
 	}
 
 	return &PostgresDatabase{
-		writePool: writePool,
-		readPools: readPools,
-		readIndex: atomic.Uint32{},
+		writePool:   writePool,
+		readPools:   readPools,
+		readIndex:   atomic.Uint32{},
+		hookManager: hm,
 	}, nil
+}
+
+// AddHook adds a new query hook to the database.
+// Thread-safe.
+func (db *PostgresDatabase) AddHook(hook QueryHook) {
+	db.hookManager.Add(hook)
 }
 
 // Exec mengeksekusi write query (INSERT, UPDATE, DELETE) ke write connection pool.
@@ -227,7 +240,7 @@ func (db *PostgresDatabase) getReadPool() *pgxpool.Pool {
 
 // createConnectionPool creates a connection pool with the specified size
 // Applies custom RuntimeParams and QueryExecMode for pgbouncer compatibility and custom configuration
-func createConnectionPool(connString string, maxConns int, runtimeParams map[string]string, queryExecMode string) (*pgxpool.Pool, error) {
+func createConnectionPool(connString string, maxConns int, runtimeParams map[string]string, queryExecMode string, hm *hookManager) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse connection string: %w", err)
@@ -245,6 +258,9 @@ func createConnectionPool(connString string, maxConns int, runtimeParams map[str
 	if queryExecMode == "simple" {
 		config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	}
+
+	// Apply Query Tracer for Observability
+	config.ConnConfig.Tracer = &dbTracer{hm: hm}
 
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
