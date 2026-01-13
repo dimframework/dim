@@ -7,11 +7,15 @@ import (
 
 func TestGenerateAccessToken(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, err := manager.GenerateAccessToken("1", "test@example.com", nil)
 	if err != nil {
@@ -25,11 +29,15 @@ func TestGenerateAccessToken(t *testing.T) {
 
 func TestVerifyAccessToken(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
@@ -49,13 +57,17 @@ func TestVerifyAccessToken(t *testing.T) {
 
 func TestVerifyAccessTokenInvalid(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
-	_, err := manager.VerifyToken("invalid-token")
+	_, err = manager.VerifyToken("invalid-token")
 	if err == nil {
 		t.Errorf("VerifyToken() should fail for invalid token")
 	}
@@ -63,11 +75,15 @@ func TestVerifyAccessTokenInvalid(t *testing.T) {
 
 func TestGenerateRefreshToken(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, err := manager.GenerateRefreshToken("1")
 	if err != nil {
@@ -81,11 +97,15 @@ func TestGenerateRefreshToken(t *testing.T) {
 
 func TestVerifyRefreshToken(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, _ := manager.GenerateRefreshToken("1")
 
@@ -101,11 +121,15 @@ func TestVerifyRefreshToken(t *testing.T) {
 
 func TestGetTokenExpiry(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
@@ -122,11 +146,15 @@ func TestGetTokenExpiry(t *testing.T) {
 
 func TestIsTokenExpired(t *testing.T) {
 	config := &JWTConfig{
-		Secret:             "test-secret",
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  1 * time.Millisecond, // Very short expiry
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager := NewJWTManager(config)
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
 
 	token, _ := manager.GenerateAccessToken("1", "test@example.com", nil)
 
@@ -145,18 +173,20 @@ func TestIsTokenExpired(t *testing.T) {
 
 func TestDifferentSecrets(t *testing.T) {
 	config1 := &JWTConfig{
-		Secret:             "secret1",
+		HMACSecret:         "secret1",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager1 := NewJWTManager(config1)
+	manager1, _ := NewJWTManager(config1)
 
 	config2 := &JWTConfig{
-		Secret:             "secret2",
+		HMACSecret:         "secret2",
+		SigningMethod:      "HS256",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
 	}
-	manager2 := NewJWTManager(config2)
+	manager2, _ := NewJWTManager(config2)
 
 	token, _ := manager1.GenerateAccessToken("1", "test@example.com", nil)
 

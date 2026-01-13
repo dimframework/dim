@@ -2,6 +2,7 @@ package dim
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -57,7 +58,7 @@ func TestLoadJWTConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadJWTConfig() failed: %v", err)
 	}
-	if cfg.Secret != "test-secret" {
+	if cfg.HMACSecret != "test-secret" {
 		t.Error("secret mismatch")
 	}
 }
@@ -198,7 +199,7 @@ func TestLoadConfig_ValidateFails(t *testing.T) {
 
 func TestValidate_MissingJWTSecret(t *testing.T) {
 	cfg := &Config{
-		JWT: JWTConfig{Secret: ""},
+		JWT: JWTConfig{HMACSecret: "", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
 			WriteHost: "localhost",
 			Database:  "testdb",
@@ -209,14 +210,14 @@ func TestValidate_MissingJWTSecret(t *testing.T) {
 	if err == nil {
 		t.Error("Validate() should fail when JWT_SECRET is missing")
 	}
-	if err.Error() != "JWT_SECRET is required" {
-		t.Errorf("Expected 'JWT_SECRET is required', got %v", err)
+	if err.Error() != "JWT_SECRET is required for HMAC signing method" {
+		t.Errorf("Expected 'JWT_SECRET is required for HMAC signing method', got %v", err)
 	}
 }
 
 func TestValidate_MissingDBWriteHost(t *testing.T) {
 	cfg := &Config{
-		JWT: JWTConfig{Secret: "secret"},
+		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
 			WriteHost: "",
 			Database:  "testdb",
@@ -234,7 +235,7 @@ func TestValidate_MissingDBWriteHost(t *testing.T) {
 
 func TestValidate_MissingDBName(t *testing.T) {
 	cfg := &Config{
-		JWT: JWTConfig{Secret: "secret"},
+		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
 			WriteHost: "localhost",
 			Database:  "",
@@ -252,7 +253,7 @@ func TestValidate_MissingDBName(t *testing.T) {
 
 func TestValidate_MissingDBUser(t *testing.T) {
 	cfg := &Config{
-		JWT: JWTConfig{Secret: "secret"},
+		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
 			WriteHost: "localhost",
 			Database:  "testdb",
@@ -270,7 +271,7 @@ func TestValidate_MissingDBUser(t *testing.T) {
 
 func TestValidate_Success(t *testing.T) {
 	cfg := &Config{
-		JWT: JWTConfig{Secret: "secret"},
+		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
 			WriteHost: "localhost",
 			Database:  "testdb",
@@ -477,5 +478,79 @@ func TestLoadCSRFConfig_FullConfig(t *testing.T) {
 	}
 	if cfg.HeaderName != "X-Custom-CSRF" {
 		t.Errorf("HeaderName = %q, want 'X-Custom-CSRF'", cfg.HeaderName)
+	}
+}
+
+func TestLoadJWTConfig_WithKeyFile(t *testing.T) {
+	// 1. Create a temporary file with "fake-pem-content"
+	tmpDir := t.TempDir()
+	keyFilePath := filepath.Join(tmpDir, "test_private_key.pem")
+	expectedContent := "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ...\n-----END PRIVATE KEY-----"
+
+	err := os.WriteFile(keyFilePath, []byte(expectedContent), 0600)
+	if err != nil {
+		t.Fatalf("Failed to write temp key file: %v", err)
+	}
+
+	// 2. Set Env var to the file path
+	os.Setenv("JWT_PRIVATE_KEY", keyFilePath)
+	defer os.Unsetenv("JWT_PRIVATE_KEY")
+
+	// 3. Load config
+	cfg, err := loadJWTConfig()
+	if err != nil {
+		t.Fatalf("loadJWTConfig() failed: %v", err)
+	}
+
+	// 4. Verify the content was loaded, NOT the path
+	if cfg.PrivateKey != expectedContent {
+		t.Errorf("Expected PrivateKey to be loaded from file content, got: %s", cfg.PrivateKey)
+	}
+}
+
+func TestLoadJWTConfig_WithRawKeyContent(t *testing.T) {
+	// Setup raw content starting with header
+	rawContent := "-----BEGIN PRIVATE KEY-----\nSOME_RAW_CONTENT\n-----END PRIVATE KEY-----"
+
+	os.Setenv("JWT_PRIVATE_KEY", rawContent)
+	defer os.Unsetenv("JWT_PRIVATE_KEY")
+
+	cfg, err := loadJWTConfig()
+	if err != nil {
+		t.Fatalf("loadJWTConfig() failed: %v", err)
+	}
+
+	if cfg.PrivateKey != rawContent {
+		t.Errorf("Expected PrivateKey to be raw content, got: %s", cfg.PrivateKey)
+	}
+}
+
+func TestLoadJWTConfig_WithPublicKeyFile(t *testing.T) {
+	// 1. Create a temporary file with "fake-public-key-content"
+	tmpDir := t.TempDir()
+	keyFilePath := filepath.Join(tmpDir, "test_public_key.pem")
+	expectedContent := "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...\n-----END PUBLIC KEY-----"
+
+	err := os.WriteFile(keyFilePath, []byte(expectedContent), 0600)
+	if err != nil {
+		t.Fatalf("Failed to write temp key file: %v", err)
+	}
+
+	// 2. Set Env var (JSON map for public keys)
+	envVal := `{"default": "` + keyFilePath + `"}`
+	os.Setenv("JWT_PUBLIC_KEYS", envVal)
+	defer os.Unsetenv("JWT_PUBLIC_KEYS")
+
+	// 3. Load config
+	cfg, err := loadJWTConfig()
+	if err != nil {
+		t.Fatalf("loadJWTConfig() failed: %v", err)
+	}
+
+	// 4. Verify
+	if val, ok := cfg.PublicKeys["default"]; !ok {
+		t.Error("Expected 'default' public key to be present")
+	} else if val != expectedContent {
+		t.Errorf("Expected PublicKey to be loaded from file, got: %s", val)
 	}
 }

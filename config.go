@@ -1,7 +1,9 @@
 package dim
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -19,16 +21,30 @@ type Config struct {
 
 // ServerConfig holds server configuration
 type ServerConfig struct {
-	Port         string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	Port            string
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
 }
 
 // JWTConfig holds JWT configuration
 type JWTConfig struct {
-	Secret             string
 	AccessTokenExpiry  time.Duration
 	RefreshTokenExpiry time.Duration
+
+	// Algorithm configuration
+	SigningMethod string // "HS256" (default), "RS256", "ES256"
+
+	// Symmetric Config (HMAC: HS256, HS384, HS512)
+	HMACSecret string
+
+	// Asymmetric Config (RSA/ECDSA: RS256, ES256)
+	PrivateKey string            // PEM content for Signing
+	PublicKeys map[string]string // Key ID (kid) -> PEM content Public Key (for rotation)
+
+	// Remote Verification (JWKS)
+	JWKSURL string
 }
 
 // DatabaseConfig holds database configuration
@@ -149,10 +165,22 @@ func loadServerConfig() (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("invalid SERVER_WRITE_TIMEOUT: %w", err)
 	}
 
+	idleTimeout, err := ParseEnvDuration(GetEnvOrDefault("SERVER_IDLE_TIMEOUT", "120s"))
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("invalid SERVER_IDLE_TIMEOUT: %w", err)
+	}
+
+	shutdownTimeout, err := ParseEnvDuration(GetEnvOrDefault("SERVER_SHUTDOWN_TIMEOUT", "10s"))
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("invalid SERVER_SHUTDOWN_TIMEOUT: %w", err)
+	}
+
 	return ServerConfig{
-		Port:         GetEnvOrDefault("SERVER_PORT", "8080"),
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
+		Port:            GetEnvOrDefault("SERVER_PORT", "8080"),
+		ReadTimeout:     readTimeout,
+		WriteTimeout:    writeTimeout,
+		IdleTimeout:     idleTimeout,
+		ShutdownTimeout: shutdownTimeout,
 	}, nil
 }
 
@@ -168,11 +196,54 @@ func loadJWTConfig() (JWTConfig, error) {
 		return JWTConfig{}, fmt.Errorf("invalid JWT_REFRESH_TOKEN_EXPIRY: %w", err)
 	}
 
+	signingMethod := GetEnvOrDefault("JWT_SIGNING_METHOD", "HS256")
+	hmacSecret := GetEnv("JWT_SECRET")
+	privateKey := resolveKeyContent(GetEnv("JWT_PRIVATE_KEY"))
+	jwksURL := GetEnv("JWT_JWKS_URL")
+
+	// Parse Public Keys (JSON format: {"kid1": "pem1", "kid2": "pem2"})
+	publicKeys := make(map[string]string)
+	publicKeysStr := GetEnv("JWT_PUBLIC_KEYS")
+	if publicKeysStr != "" {
+		if err := json.Unmarshal([]byte(publicKeysStr), &publicKeys); err != nil {
+			return JWTConfig{}, fmt.Errorf("invalid JWT_PUBLIC_KEYS format (expected JSON): %w", err)
+		}
+		// Resolve file paths for public keys if necessary
+		for k, v := range publicKeys {
+			publicKeys[k] = resolveKeyContent(v)
+		}
+	}
+
 	return JWTConfig{
-		Secret:             GetEnv("JWT_SECRET"),
 		AccessTokenExpiry:  accessTokenExpiry,
 		RefreshTokenExpiry: refreshTokenExpiry,
+		SigningMethod:      signingMethod,
+		HMACSecret:         hmacSecret,
+		PrivateKey:         privateKey,
+		PublicKeys:         publicKeys,
+		JWKSURL:            jwksURL,
 	}, nil
+}
+
+// resolveKeyContent checks if the value is a file path and reads it,
+// otherwise returns the value as is (assuming it's PEM content).
+func resolveKeyContent(val string) string {
+	if val == "" {
+		return ""
+	}
+	// Check if it's already a PEM string (starts with -----BEGIN)
+	if strings.HasPrefix(strings.TrimSpace(val), "-----BEGIN") {
+		return val
+	}
+
+	// Try to read as file
+	b, err := os.ReadFile(val)
+	if err == nil {
+		return string(b)
+	}
+
+	// If failed to read file, assume it's the content (or invalid path)
+	return val
 }
 
 // loadDatabaseConfig loads database configuration
@@ -304,8 +375,15 @@ func loadCSRFConfig() (CSRFConfig, error) {
 // Validate memvalidasi konfigurasi aplikasi untuk memastikan nilai required sudah ada.
 // Mengecek JWT_SECRET, DB_WRITE_HOST, DB_NAME, dan DB_USER.
 func (c *Config) Validate() error {
-	if c.JWT.Secret == "" {
-		return fmt.Errorf("JWT_SECRET is required")
+	if strings.HasPrefix(c.JWT.SigningMethod, "HS") {
+		if c.JWT.HMACSecret == "" {
+			return fmt.Errorf("JWT_SECRET is required for HMAC signing method")
+		}
+	} else if strings.HasPrefix(c.JWT.SigningMethod, "RS") || strings.HasPrefix(c.JWT.SigningMethod, "ES") {
+		if c.JWT.PrivateKey == "" && c.JWT.JWKSURL == "" {
+			// Jika pakai asymmetric, minimal butuh Private Key (untuk sign) ATAU JWKS (untuk verify saja)
+			return fmt.Errorf("JWT_PRIVATE_KEY is required for RSA/ECDSA signing method")
+		}
 	}
 
 	if c.Database.WriteHost == "" {
