@@ -2,6 +2,7 @@ package dim
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -381,4 +382,23 @@ func Conflict(w http.ResponseWriter, message string, errors map[string]string) e
 //	InternalServerError(w, "Terjadi kesalahan pada server")
 func InternalServerError(w http.ResponseWriter, message string) error {
 	return JsonError(w, http.StatusInternalServerError, message, nil)
+}
+
+// TooManyRequests menulis 429 Too Many Requests response.
+// Mengatur header Retry-After dan mengirim pesan error standar.
+// Berguna untuk rate limiting middleware.
+//
+// Parameters:
+//   - w: http.ResponseWriter untuk menulis response
+//   - retryAfterSeconds: jumlah detik yang harus ditunggu client sebelum retry
+//
+// Returns:
+//   - error: error jika encoding JSON gagal
+//
+// Example:
+//
+//	TooManyRequests(w, 60)
+func TooManyRequests(w http.ResponseWriter, retryAfterSeconds int) error {
+	w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
+	return JsonError(w, http.StatusTooManyRequests, "Batas tingkat permintaan terlampaui", nil)
 }
