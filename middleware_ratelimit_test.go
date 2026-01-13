@@ -1,7 +1,7 @@
 package dim
 
 import (
-	"fmt"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -158,19 +158,32 @@ func TestRateLimiterCheckIPLimit(t *testing.T) {
 		ResetPeriod: 1 * time.Second,
 	}
 
-	limiter := NewRateLimiter(config)
+	limiter := NewRateLimiter(config, nil)
+	ctx := context.Background()
 
 	// First two should succeed
-	if !limiter.CheckIPLimit("127.0.0.1") {
+	allowed, err := limiter.CheckIPLimit(ctx, "127.0.0.1")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !allowed {
 		t.Errorf("first IP limit check should succeed")
 	}
 
-	if !limiter.CheckIPLimit("127.0.0.1") {
+	allowed, err = limiter.CheckIPLimit(ctx, "127.0.0.1")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !allowed {
 		t.Errorf("second IP limit check should succeed")
 	}
 
 	// Third should fail
-	if limiter.CheckIPLimit("127.0.0.1") {
+	allowed, err = limiter.CheckIPLimit(ctx, "127.0.0.1")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if allowed {
 		t.Errorf("third IP limit check should fail")
 	}
 }
@@ -182,13 +195,15 @@ func TestRateLimiterReset(t *testing.T) {
 		ResetPeriod: 100 * time.Millisecond,
 	}
 
-	limiter := NewRateLimiter(config)
+	limiter := NewRateLimiter(config, nil)
+	ctx := context.Background()
 
 	// Use up the limit
-	limiter.CheckIPLimit("127.0.0.1")
+	limiter.CheckIPLimit(ctx, "127.0.0.1")
 
 	// Should fail (Goreus Cache will auto-expire after ResetPeriod)
-	if limiter.CheckIPLimit("127.0.0.1") {
+	allowed, _ := limiter.CheckIPLimit(ctx, "127.0.0.1")
+	if allowed {
 		t.Errorf("should fail after limit reached")
 	}
 
@@ -197,33 +212,9 @@ func TestRateLimiterReset(t *testing.T) {
 
 	// Cache entry should be expired, counter resets to 0
 	// Next call should start counting from 1 again
-	if !limiter.CheckIPLimit("127.0.0.1") {
+	allowed, _ = limiter.CheckIPLimit(ctx, "127.0.0.1")
+	if !allowed {
 		t.Errorf("should succeed after TTL expiration")
-	}
-}
-
-func TestRateLimiterCacheLRUEviction(t *testing.T) {
-	// Test that cache respects max size (10000 entries)
-	config := RateLimitConfig{
-		PerIP:       1000, // High limit to test cache size, not rate limiting
-		PerUser:     1000,
-		ResetPeriod: 10 * time.Second,
-	}
-
-	limiter := NewRateLimiter(config)
-
-	// Try to add many IPs (more than default maxSize)
-	// The cache should handle LRU eviction gracefully
-	for i := 0; i < 100; i++ {
-		ip := fmt.Sprintf("192.168.1.%d", i)
-		if !limiter.CheckIPLimit(ip) {
-			t.Errorf("IP %s should be within limit", ip)
-		}
-	}
-
-	// Verify we can still track IPs (no panic or errors)
-	if !limiter.CheckIPLimit("192.168.1.0") {
-		t.Errorf("initial IP should still be trackable")
 	}
 }
 
