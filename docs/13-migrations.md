@@ -44,26 +44,35 @@ Current Database
 
 ### Framework Migration System
 
-Framework dim menggunakan **Go functions** untuk migrations:
+Framework dim menyediakan sistem migrasi bawaan yang dikonsolidasikan. Anda dapat dengan mudah menjalankan semua tabel yang diperlukan oleh fitur-fitur dim (User, Token, Rate Limit) menggunakan satu fungsi helper.
+
+#### Migrasi Bawaan
+
+Migrasi framework dibagi menjadi beberapa modul untuk memudahkan pemeliharaan:
+- **User Migrations**: Tabel `users`.
+- **Token Migrations**: Tabel `refresh_tokens`, `password_reset_tokens`, dan `token_blocklist`.
+- **Rate Limit Migrations**: Tabel `rate_limits`.
+
+#### Menjalankan Migrasi Framework
+
+Gunakan `dim.GetFrameworkMigrations()` untuk mendapatkan daftar lengkap migrasi inti.
 
 ```go
-import "github.com/jackc/pgx/v5/pgxpool"
-
-type Migration struct {
-    Version int                      // Sequential version number
-    Name    string                   // Description
-    Up      func(*pgxpool.Pool) error     // Apply migration
-    Down    func(*pgxpool.Pool) error     // Rollback migration
+func main() {
+    db, _ := dim.NewPostgresDatabase(cfg.Database)
+    defer db.Close()
+    
+    // Ambil semua migrasi inti framework dim
+    migrations := dim.GetFrameworkMigrations()
+    
+    // Jalankan migrasi
+    if err := dim.RunMigrations(db, migrations); err != nil {
+        log.Fatal("Gagal menjalankan migrasi:", err)
+    }
+    
+    log.Println("Migrasi framework selesai")
 }
 ```
-
-### Why Migrations?
-
-- **Version control** - Track schema changes
-- **Consistency** - Same schema across environments
-- **Reversibility** - Rollback if needed
-- **Documentation** - Each change documented
-- **Team coordination** - Everyone uses same schema
 
 ---
 

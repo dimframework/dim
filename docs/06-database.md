@@ -57,6 +57,12 @@ if err != nil {
     log.Fatal(err)
 }
 defer db.Close()
+
+// Opsional: Jalankan migrasi inti framework
+// Ini akan membuat tabel users, tokens, dan rate_limits jika belum ada.
+if err := dim.RunMigrations(db, dim.GetFrameworkMigrations()); err != nil {
+    log.Fatal("Gagal migrasi:", err)
+}
 ```
 
 ---

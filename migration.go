@@ -22,6 +22,22 @@ type MigrationHistory struct {
 	Name    string
 }
 
+// GetFrameworkMigrations mengembalikan semua migrasi bawaan framework dim (User, Token, RateLimit).
+// Migrasi ini mencakup tabel-tabel inti yang diperlukan oleh fitur-fitur framework.
+// Urutan versi:
+// 1. Users
+// 2. Refresh Tokens
+// 3. Password Reset Tokens
+// 4. Token Blocklist
+// 5. Rate Limits
+func GetFrameworkMigrations() []Migration {
+	var migrations []Migration
+	migrations = append(migrations, GetUserMigrations()...)
+	migrations = append(migrations, GetTokenMigrations()...)
+	migrations = append(migrations, GetRateLimitMigrations()...)
+	return migrations
+}
+
 // RunMigrations menjalankan semua pending migrations yang belum pernah dijalankan.
 // Membuat migrations table jika belum ada, kemudian menjalankan migrations yang baru.
 // Semua migrations di-log menggunakan slog.
