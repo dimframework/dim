@@ -5,6 +5,7 @@ Dim adalah web framework Go yang modern, beropini, dan kaya fitur, dirancang unt
 ## Fitur Utama
 
 - **🚀 Modern Routing:** Dibangun di atas `http.ServeMux` Go 1.22+ dengan dukungan native untuk path parameters (`/users/{id}`), pencocokan metode HTTP, dan wildcards.
+- **🖥️ CLI & Console:** Sistem CLI built-in yang powerful untuk menjalankan server, migrasi database, dan introspeksi route.
 - **🛡️ Middleware Lengkap:** Dukungan bawaan untuk CORS, CSRF, Rate Limiting, Recovery, dan Structured Logging.
 - **🗄️ Integrasi Database Canggih:** 
   - Wrapper untuk `pgx` guna interaksi PostgreSQL performa tinggi.
@@ -25,104 +26,76 @@ go get github.com/nuradiyana/dim
 
 ## Mulai Cepat (Quick Start)
 
-Berikut adalah contoh lengkap cara membuat API dengan **Database**, **JWT Authentication**, dan **Protected Routes**:
+Berikut adalah cara standar menginisialisasi aplikasi menggunakan sistem **Console**:
 
 ```go
 package main
 
 import (
-	"context"
-	"log/slog"
-	"net/http"
+	"log"
 	"os"
-	"time"
 
 	"github.com/nuradiyana/dim"
 )
 
 func main() {
-	// 1. Setup Database
-	dbConfig := dim.DatabaseConfig{
-		WriteHost:     "localhost",
-		Port:          5432,
-		Database:      "myapp_db",
-		Username:      "postgres",
-		Password:      "secret",
-		SSLMode:       "disable",
-		MaxConns:      10,
-	}
-	
-	db, err := dim.NewPostgresDatabase(dbConfig)
+	// 1. Load Config
+	config, err := dim.LoadConfig()
 	if err != nil {
-		slog.Error("Gagal connect ke database", "error", err)
-		os.Exit(1)
+		log.Fatal(err)
+	}
+
+	// 2. Setup Database
+	db, err := dim.NewPostgresDatabase(config.Database)
+	if err != nil {
+		log.Fatal(err)
 	}
 	defer db.Close()
 
-	// 2. Setup JWT Manager
-	jwtConfig := &dim.JWTConfig{
-		SigningMethod:     "HS256",
-		HMACSecret:        "super-secret-key-change-me",
-		AccessTokenExpiry: 24 * time.Hour,
-	}
-	
-	jwtManager, err := dim.NewJWTManager(jwtConfig)
-	if err != nil {
-		slog.Error("Gagal init JWT", "error", err)
-		os.Exit(1)
-	}
-
 	// 3. Init Router
 	router := dim.NewRouter()
-
-	// Global Middleware
 	router.Use(dim.RecoveryMiddleware)
 	router.Use(dim.LoggerMiddleware)
 
-	// --- Public Routes ---
-	router.Post("/login", func(w http.ResponseWriter, r *http.Request) {
-		// Contoh login sederhana (di real app, verifikasi password user dari DB)
-		userID := "123"
-		email := "user@example.com"
-
-		// Generate Token
-		token, _ := jwtManager.GenerateAccessToken(userID, email, nil)
-		
-		dim.Response(w).Ok(dim.Map{
-			"token": token,
-		})
+	// Register Routes
+	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		dim.Response(w).Ok(dim.Map{"message": "Hello from Dim!"})
 	})
 
-	// --- Protected Routes ---
-	// Menggunakan Middleware RequireAuth
-	api := router.Group("/api", dim.RequireAuth(jwtManager))
-	
-	api.Get("/profile", func(w http.ResponseWriter, r *http.Request) {
-		// ... (kode sebelumnya)
-		dim.Response(w).Ok(dim.Map{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  name,
-		})
-	})
+	// Build Router (Optimasi untuk introspeksi)
+	router.Build()
 
-	// --- Static Files & SPA ---
-	// Melayani file statis (css, js, images)
-	router.Static("/public/", os.DirFS("./assets"))
+	// 4. Init Console & Run
+	console := dim.NewConsole(db, router, config)
+	console.RegisterBuiltInCommands()
 
-	// Melayani SPA (React/Vue/dll) dengan fallback ke index.html
-	// Penting: SPA didaftarkan terakhir agar tidak bentrok dengan API
-	router.SPA(os.DirFS("./dist"), "index.html")
-
-	// 4. Start Server
-	config := dim.ServerConfig{Port: "8080"}
-	ctx := context.Background()
-	slog.Info("Server berjalan di port :8080")
-	
-	if err := dim.StartServer(ctx, config, router); err != nil {
-		slog.Error("Server stopped", "error", err)
+	// Menjalankan aplikasi via CLI
+	// Default: menjalankan server (serve)
+	if err := console.Run(os.Args[1:]); err != nil {
+		log.Fatal(err)
 	}
 }
+```
+
+## CLI & Console
+
+Framework dim dilengkapi dengan CLI bawaan untuk memudahkan operasional. Setelah setup di atas, Anda dapat menggunakan perintah berikut:
+
+```bash
+# Menjalankan Server (Default)
+go run main.go
+go run main.go serve -port 3000
+
+# Manajemen Database
+go run main.go migrate              # Jalankan pending migrations
+go run main.go migrate:list         # Cek status migrasi
+go run main.go migrate:rollback     # Batalkan migrasi terakhir
+
+# Introspeksi Route
+go run main.go route:list           # Lihat semua route yang terdaftar
+
+# Bantuan
+go run main.go help
 ```
 
 ## Modul Inti
