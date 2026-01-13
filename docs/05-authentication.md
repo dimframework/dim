@@ -23,6 +23,15 @@ JWT (JSON Web Token) digunakan sebagai token *stateless* untuk autentikasi API. 
 
 ## Konfigurasi
 
+### Persiapan Database
+
+Fitur autentikasi memerlukan tabel `users` dan `refresh_tokens`. Anda dapat menggunakan sistem migrasi bawaan untuk menyiapkannya:
+
+```go
+// Menjalankan migrasi untuk user dan token
+dim.RunMigrations(db, append(dim.GetUserMigrations(), dim.GetTokenMigrations()...))
+```
+
 ### Environment Variables
 
 Pastikan variabel berikut ada di `.env` Anda:

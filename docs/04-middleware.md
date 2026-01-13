@@ -171,11 +171,12 @@ router.Use(dim.RateLimit(config))
 // 1. Setup koneksi DB
 db, _ := dim.NewPostgresDatabase(dbConfig)
 
-// 2. Buat store rate limit
-rateStore := dim.NewPostgresRateLimitStore(db)
+// 2. Jalankan migrasi rate limit
+// Ini akan membuat tabel 'rate_limits' yang diperlukan
+dim.RunMigrations(db, dim.GetRateLimitMigrations())
 
-// 3. Init schema (buat tabel jika belum ada)
-rateStore.InitSchema(context.Background())
+// 3. Buat store rate limit
+rateStore := dim.NewPostgresRateLimitStore(db)
 
 // 4. Gunakan di middleware
 router.Use(dim.RateLimit(config, rateStore))
