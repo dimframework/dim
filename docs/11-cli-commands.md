@@ -11,6 +11,7 @@ Framework dim dilengkapi dengan sistem CLI (Command Line Interface) yang powerfu
   - [migrate:rollback](#migrate-rollback)
   - [migrate:list](#migrate-list)
   - [route:list](#route-list)
+  - [make:migration](#make-migration)
 - [Custom Commands](#custom-commands)
 
 ---
@@ -162,6 +163,23 @@ Registered Routes (5 total):
 
 GET     /users                         -> main.getUsersHandler              [dim.LoggerMiddleware]
 POST    /users                         -> main.createUserHandler            [dim.LoggerMiddleware, dim.AuthMiddleware]
+```
+
+### `make:migration`
+Membuat file template migrasi database baru dengan timestamp otomatis.
+
+**Usage:**
+```bash
+go run main.go make:migration <migration_name> [--dir <directory>]
+```
+
+**Examples:**
+```bash
+# Basic usage
+go run main.go make:migration create_products
+
+# Custom directory
+go run main.go make:migration add_index_to_users --dir internal/migrations
 ```
 
 ---
