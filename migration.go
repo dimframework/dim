@@ -10,7 +10,7 @@ import (
 
 // Migration represents a single migration
 type Migration struct {
-	Version int
+	Version int64
 	Name    string
 	Up      func(*pgxpool.Pool) error
 	Down    func(*pgxpool.Pool) error
@@ -18,8 +18,25 @@ type Migration struct {
 
 // MigrationHistory represents the migration history table
 type MigrationHistory struct {
-	Version int
+	Version int64
 	Name    string
+}
+
+var migrationRegistry []Migration
+
+// Register mendaftarkan migration ke global registry.
+// Fungsi ini biasanya dipanggil di dalam fungsi init() pada file migration.
+func Register(m Migration) {
+	migrationRegistry = append(migrationRegistry, m)
+}
+
+// GetRegisteredMigrations mengembalikan semua migration yang terdaftar via Register().
+// Migration akan otomatis diurutkan berdasarkan Version.
+func GetRegisteredMigrations() []Migration {
+	// Kopi slice untuk menghindari side effects modifikasi eksternal
+	migrations := make([]Migration, len(migrationRegistry))
+	copy(migrations, migrationRegistry)
+	return migrations
 }
 
 // GetFrameworkMigrations mengembalikan semua migrasi bawaan framework dim (User, Token, RateLimit).
@@ -125,7 +142,7 @@ func RollbackMigration(db *PostgresDatabase, migration Migration) error {
 func ensureMigrationsTable(db *PostgresDatabase) error {
 	_, err := db.writePool.Exec(context.Background(), `
 		CREATE TABLE IF NOT EXISTS migrations (
-			version INTEGER PRIMARY KEY,
+			version BIGINT PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
 			applied_at TIMESTAMP DEFAULT NOW()
 		)
@@ -134,16 +151,16 @@ func ensureMigrationsTable(db *PostgresDatabase) error {
 }
 
 // getAppliedMigrations retrieves all applied migrations
-func getAppliedMigrations(db *PostgresDatabase) (map[int]MigrationHistory, error) {
+func getAppliedMigrations(db *PostgresDatabase) (map[int64]MigrationHistory, error) {
 	rows, err := db.writePool.Query(context.Background(), "SELECT version, name FROM migrations ORDER BY version")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	applied := make(map[int]MigrationHistory)
+	applied := make(map[int64]MigrationHistory)
 	for rows.Next() {
-		var version int
+		var version int64
 		var name string
 
 		if err := rows.Scan(&version, &name); err != nil {

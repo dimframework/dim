@@ -4,7 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -39,9 +42,11 @@ func (c *MigrateCommand) Execute(ctx *CommandContext) error {
 	}
 
 	migrations := GetFrameworkMigrations()
+	// Combine with registered migrations (from auto-discovery)
+	migrations = append(migrations, GetRegisteredMigrations()...)
 
 	if c.verbose {
-		fmt.Printf("Found %d framework migrations\n", len(migrations))
+		fmt.Printf("Found %d total migrations\n", len(migrations))
 	}
 
 	if err := RunMigrations(ctx.DB, migrations); err != nil {
@@ -97,9 +102,11 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 	// Collect migrations to rollback
 	var migrationsToRollback []Migration
 	frameworkMigrations := GetFrameworkMigrations()
+	// Add registered migrations
+	frameworkMigrations = append(frameworkMigrations, GetRegisteredMigrations()...)
 
 	for rows.Next() {
-		var version int
+		var version int64
 		var name string
 		if err := rows.Scan(&version, &name); err != nil {
 			return err
@@ -160,6 +167,143 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 }
 
 // ============================================================================
+// MakeMigrationCommand - Create a new migration file
+// ============================================================================
+
+// MakeMigrationCommand generates a new migration file
+type MakeMigrationCommand struct {
+	dir string
+	pkg string
+}
+
+func (c *MakeMigrationCommand) Name() string {
+	return "make:migration"
+}
+
+func (c *MakeMigrationCommand) Description() string {
+	return "Create a new migration file"
+}
+
+func (c *MakeMigrationCommand) DefineFlags(fs *flag.FlagSet) {
+	fs.StringVar(&c.dir, "dir", "migrations", "Directory to store migration files")
+	fs.StringVar(&c.pkg, "pkg", "", "Go package name (default: directory name)")
+}
+
+func (c *MakeMigrationCommand) Execute(ctx *CommandContext) error {
+	if len(ctx.Args) < 1 {
+		return fmt.Errorf("migration name is required\nUsage: make:migration <name>")
+	}
+
+	name := ctx.Args[0]
+	name = strings.ToLower(name)
+
+	// Create directory if not exists
+	if err := os.MkdirAll(c.dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Determine package name
+	pkgName := c.pkg
+	if pkgName == "" {
+		pkgName = filepath.Base(c.dir)
+		if pkgName == "." || pkgName == "/" {
+			pkgName = "migrations"
+		}
+	}
+
+	// Generate timestamp version
+	timestamp := time.Now()
+	version := timestamp.Format("20060102150405")
+
+	// Construct filename: YYYYMMDDHHMMSS_name.go
+	filename := fmt.Sprintf("%s_%s.go", version, name)
+	filepath := filepath.Join(c.dir, filename)
+
+	// CamelCase name for Go functions (create_users -> CreateUsers)
+	funcName := ToCamelCase(name)
+
+	data := migrationTemplateData{
+		Package:   pkgName,
+		Version:   version,
+		Name:      name,
+		FuncName:  funcName,
+		Timestamp: timestamp.Format(time.RFC3339),
+	}
+
+	// Create file
+	f, err := os.Create(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer f.Close()
+
+	// Execute template
+	tmpl, err := template.New("migration").Parse(migrationTemplate)
+	if err != nil {
+		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	if err := tmpl.Execute(f, data); err != nil {
+		return fmt.Errorf("failed to write template: %w", err)
+	}
+
+	fmt.Printf("✓ Migration created: %s\n", filepath)
+	fmt.Printf("  Version: %s\n", version)
+	fmt.Println("\nDon't forget to import this package in your main.go to register it:")
+	fmt.Printf("  import _ \"github.com/nuradiyana/dimulai/%s\"\n", c.dir)
+
+	return nil
+}
+
+type migrationTemplateData struct {
+	Package   string
+	Version   string
+	Name      string
+	FuncName  string
+	Timestamp string
+}
+
+const migrationTemplate = `package {{.Package}}
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nuradiyana/dim"
+)
+
+func init() {
+	dim.Register(dim.Migration{
+		Version: {{.Version}},
+		Name:    "{{.Name}}",
+		Up:      Up{{.FuncName}},
+		Down:    Down{{.FuncName}},
+	})
+}
+
+// Up{{.FuncName}} executes the migration (add tables, columns, etc)
+func Up{{.FuncName}}(pool *pgxpool.Pool) error {
+	// TODO: Write your migration SQL here
+	query := ` + "`" + `
+		CREATE TABLE IF NOT EXISTS example (
+			id BIGSERIAL PRIMARY KEY,
+			created_at TIMESTAMP DEFAULT NOW()
+		);
+	` + "`" + `
+	_, err := pool.Exec(context.Background(), query)
+	return err
+}
+
+// Down{{.FuncName}} rolls back the migration (drop tables, columns, etc)
+func Down{{.FuncName}}(pool *pgxpool.Pool) error {
+	// TODO: Write your rollback SQL here
+	query := "DROP TABLE IF EXISTS example CASCADE"
+	_, err := pool.Exec(context.Background(), query)
+	return err
+}
+`
+
+// ============================================================================
 // MigrateListCommand - List migration status
 // ============================================================================
 
@@ -181,9 +325,11 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 
 	// Get all framework migrations
 	frameworkMigrations := GetFrameworkMigrations()
+	// Add registered migrations
+	frameworkMigrations = append(frameworkMigrations, GetRegisteredMigrations()...)
 
 	// Get applied migrations from database
-	appliedMap := make(map[int]time.Time)
+	appliedMap := make(map[int64]time.Time)
 	query := `SELECT version, applied_at FROM migrations ORDER BY version`
 	rows, err := ctx.DB.Query(context.Background(), query)
 	if err != nil {
@@ -192,7 +338,7 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 	} else {
 		defer rows.Close()
 		for rows.Next() {
-			var version int
+			var version int64
 			var appliedAt time.Time
 			if err := rows.Scan(&version, &appliedAt); err != nil {
 				return err

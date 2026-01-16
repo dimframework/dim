@@ -135,6 +135,7 @@ func (c *Console) RegisterBuiltInCommands() {
 	c.Register(&MigrateRollbackCommand{})
 	c.Register(&MigrateListCommand{})
 	c.Register(&RouteListCommand{})
+	c.Register(&MakeMigrationCommand{})
 	c.Register(&HelpCommand{console: c})
 }
 

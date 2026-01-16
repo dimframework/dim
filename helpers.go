@@ -112,6 +112,24 @@ func CleanIPAddress(address string) string {
 	return address
 }
 
+// ToCamelCase converts snake_case or anything to CamelCase (PascalCase)
+// example: create_users -> CreateUsers
+func ToCamelCase(s string) string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+
+	for i, part := range parts {
+		if len(part) > 0 {
+			runes := []rune(part)
+			runes[0] = unicode.ToUpper(runes[0])
+			parts[i] = string(runes)
+		}
+	}
+
+	return strings.Join(parts, "")
+}
+
 // GetCookie mengambil nilai cookie dari HTTP request berdasarkan nama.
 // Returns empty string jika cookie tidak ditemukan.
 //
