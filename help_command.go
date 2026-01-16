@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // HelpCommand menampilkan daftar semua command yang tersedia.
@@ -31,46 +32,96 @@ func (c *HelpCommand) Execute(ctx *CommandContext) error {
 	fmt.Fprintln(out, "Available commands:")
 	fmt.Fprintln(out)
 
-	// Find longest command name for alignment
-	maxLen := 0
+	// 1. Collect all command names
+	var names []string
 	for name := range c.console.commands {
-		if len(name) > maxLen {
-			maxLen = len(name)
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	// 2. Identify namespaces
+	namespaces := make(map[string]bool)
+	for _, name := range names {
+		if strings.Contains(name, ":") {
+			parts := strings.SplitN(name, ":", 2)
+			namespaces[parts[0]] = true
 		}
 	}
 
-	// Display commands in consistent order
-	commandOrder := []string{"serve", "migrate", "migrate:rollback", "migrate:list", "route:list", "help"}
+	// 3. Group commands
+	rootCommands := []string{}
+	groupedCommands := make(map[string][]string)
 
-	for _, name := range commandOrder {
-		if cmd, exists := c.console.commands[name]; exists {
-			fmt.Fprintf(out, "  %-*s  %s\n", maxLen, name, cmd.Description())
-		}
-	}
+	for _, name := range names {
+		// Check if it belongs to a namespace
+		var processed bool
 
-	// Collect and sort custom commands not in the predefined order
-	var customCommands []string
-	for name := range c.console.commands {
-		// Check if already displayed
-		inOrder := false
-		for _, orderedName := range commandOrder {
-			if name == orderedName {
-				inOrder = true
-				break
+		// Case 1: has prefix
+		if strings.Contains(name, ":") {
+			parts := strings.SplitN(name, ":", 2)
+			ns := parts[0]
+			groupedCommands[ns] = append(groupedCommands[ns], name)
+			processed = true
+		} else {
+			// Case 2: is a namespace root (e.g. "migrate")
+			if namespaces[name] {
+				groupedCommands[name] = append(groupedCommands[name], name)
+				processed = true
 			}
 		}
-		if !inOrder {
-			customCommands = append(customCommands, name)
+
+		// Case 3: Root command
+		if !processed {
+			rootCommands = append(rootCommands, name)
 		}
 	}
 
-	// Sort custom commands alphabetically
-	sort.Strings(customCommands)
+	// Calculate padding for alignment
+	// We want descriptions to be aligned globally.
+	// Root commands indent: 2 spaces
+	// Group commands indent: 4 spaces (2 + 2)
+	maxVisualLen := 0
+	for _, name := range rootCommands {
+		if len(name) > maxVisualLen {
+			maxVisualLen = len(name)
+		}
+	}
+	for _, cmds := range groupedCommands {
+		for _, name := range cmds {
+			// +2 for extra indentation
+			if len(name)+2 > maxVisualLen {
+				maxVisualLen = len(name) + 2
+			}
+		}
+	}
 
-	// Display sorted custom commands
-	for _, name := range customCommands {
+	// Print Root Commands
+	for _, name := range rootCommands {
 		cmd := c.console.commands[name]
-		fmt.Fprintf(out, "  %-*s  %s\n", maxLen, name, cmd.Description())
+		fmt.Fprintf(out, "  %-*s  %s\n", maxVisualLen, name, cmd.Description())
+	}
+
+	// Sort and Print Groups
+	var sortedGroups []string
+	for ns := range groupedCommands {
+		sortedGroups = append(sortedGroups, ns)
+	}
+	sort.Strings(sortedGroups)
+
+	for _, ns := range sortedGroups {
+		cmds := groupedCommands[ns]
+		fmt.Fprintf(out, "  %s\n", ns)
+
+		// Sort commands within group? They are already sorted because 'names' was sorted,
+		// but let's be sure.
+		// 'names' is sorted alphabetically. Populating 'groupedCommands' by iterating 'names' maintains order.
+		// So cmds is sorted.
+
+		for _, name := range cmds {
+			cmd := c.console.commands[name]
+			// Indent 4 spaces. Width for padding is maxVisualLen - 2.
+			fmt.Fprintf(out, "    %-*s  %s\n", maxVisualLen-2, name, cmd.Description())
+		}
 	}
 
 	fmt.Fprintln(out)
