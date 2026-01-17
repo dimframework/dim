@@ -26,7 +26,7 @@ package main
 import (
     "log"
     "os"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 func main() {

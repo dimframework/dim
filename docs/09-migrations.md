@@ -69,7 +69,7 @@ package migrations
 import (
     "context"
     "github.com/jackc/pgx/v5/pgxpool"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 // init() otomatis dijalankan saat aplikasi start
@@ -117,7 +117,7 @@ Agar migrasi "terbaca" oleh command `migrate`, Anda harus melakukan **Blank Impo
 package main
 
 import (
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
     
     // PENTING: Import folder migrations agar ter-register
     _ "github.com/username/project/migrations"

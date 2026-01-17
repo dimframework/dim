@@ -25,7 +25,7 @@ Pelajari cara menginstal dim dan membuat server HTTP pertama Anda.
 Tambahkan dim ke proyek Anda:
 
 ```bash
-go get github.com/nuradiyana/dim
+go get github.com/dimframework/dim
 ```
 
 ---
@@ -42,7 +42,7 @@ import (
     "log/slog"
     "net/http"
     
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 func main() {
@@ -156,7 +156,7 @@ import (
     "net/http"
     "os"
 
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 func main() {
@@ -211,4 +211,4 @@ Port 8080 sedang dipakai. Matikan proses lama atau ganti port di `.env`.
 Pastikan PostgreSQL berjalan jika Anda mengonfigurasi koneksi database.
 
 ### "undefined: dim.StartServer"
-Pastikan Anda menggunakan versi `dim` terbaru. Jalankan `go get -u github.com/nuradiyana/dim`.
+Pastikan Anda menggunakan versi `dim` terbaru. Jalankan `go get -u github.com/dimframework/dim`.

@@ -1,183 +1,128 @@
 # Dim Framework
 
-Dim adalah web framework Go yang modern, beropini, dan kaya fitur, dirancang untuk membangun RESTful API yang *scalable*. Framework ini memanfaatkan kekuatan standar library `http.ServeMux` (Go 1.22+) sambil menyediakan berbagai *tools* pendukung untuk aplikasi skala *enterprise*.
+Dim adalah web framework Go yang **sederhana**, dirancang untuk membantu membangun RESTful API dengan cepat.
 
-## Fitur Utama
+Saya membangun Dim di atas `http.ServeMux` (Go 1.22+) agar tetap ringan dan kompatibel dengan standar library Go, namun menambahkan berbagai "bumbu" yang biasanya saya butuhkan di aplikasi nyata: konsistensi struktur, database management, dan keamanan.
 
-- **🚀 Modern Routing:** Dibangun di atas `http.ServeMux` Go 1.22+ dengan dukungan native untuk path parameters (`/users/{id}`), pencocokan metode HTTP, dan wildcards.
-- **🖥️ CLI & Console:** Sistem CLI built-in yang powerful untuk menjalankan server, migrasi database, dan introspeksi route.
-- **🛡️ Middleware Lengkap:** Dukungan bawaan untuk CORS, CSRF, Rate Limiting, Recovery, dan Structured Logging.
-- **🗄️ Integrasi Database Canggih:** 
-  - Wrapper untuk `pgx` guna interaksi PostgreSQL performa tinggi.
-  - **Automatic Query Tracing** dengan fitur masking data sensitif (perlindungan PII di log).
-- **🔐 Keamanan:** 
-  - Helper untuk JWT Authentication.
-  - Utilitas hashing password yang aman.
-  - Validasi berbasis context.
-- **📄 Standar JSON:API:** Alat bantu untuk memudahkan pagination, sorting, dan filtering respons API.
-- **⚙️ Manajemen Konfigurasi:** Pemuatan konfigurasi berbasis *environment variables*.
-- **📝 Structured Logging:** Integrasi logger bawaan untuk *observability* yang lebih baik.
+## Kenapa Dim?
+
+Daripada menyusun ulang *library* yang sama setiap kali memulai project baru (seperti Router, Middleware, Config, Database), Dim menyediakannya dalam satu paket yang kohesif dan siap pakai.
+
+### Fitur yang "Just Works"
+
+- **Routing:** Menggunakan standar `http.ServeMux` Go 1.22+ dengan dukungan parameter (`/users/{id}`) dan method matching.
+- **Productivity CLI:** Command line tools bawaan untuk migrasi database, generate file, dan manajemen server.
+- **Database Ready:** Wrapper `pgx` untuk PostgreSQL dengan fitur **Auto-Masking Logs** (data sensitif di log database otomatis disensor).
+- **Security First:** Bawaan Rate Limiting, CORS, CSRF, dan JWT helpers.
+- **Developer Experience:** Helper untuk JSON response, pagination, sorting, dan error handling yang konsisten.
 
 ## Instalasi
 
 ```bash
-go get github.com/nuradiyana/dim
+go get github.com/dimframework/dim
 ```
 
-## Mulai Cepat (Quick Start)
+## Dokumentasi Lengkap
 
-Berikut adalah cara standar menginisialisasi aplikasi menggunakan sistem **Console**:
+Panduan lengkap, referensi API, dan tutorial mendalam tersedia di folder [docs](docs/):
+
+- [Getting Started](docs/01-getting-started.md)
+- [Architecture](docs/02-architecture.md)
+- [Routing](docs/03-routing.md)
+- [Handlers](docs/04-handlers.md)
+- [Middleware](docs/05-middleware.md)
+- [Request Context](docs/06-request-context.md)
+- [Response Helpers](docs/07-response-helpers.md)
+- [Database](docs/08-database.md)
+- [Migrations](docs/09-migrations.md)
+- [Configuration](docs/10-configuration.md)
+- [CLI Commands](docs/11-cli-commands.md)
+- [Authentication](docs/12-authentication.md)
+- [Validation](docs/13-validation.md)
+- [Error Handling](docs/14-error-handling.md)
+- [Dan lainnya](docs/README.md)
+
+## Cara Pakai
+
+Berikut adalah setup standar aplikasi menggunakan **Console** agar fitur CLI aktif:
 
 ```go
 package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 
-	"github.com/nuradiyana/dim"
+	"github.com/dimframework/dim"
 )
 
 func main() {
-	// 1. Load Config
-	config, err := dim.LoadConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 2. Setup Database
-	db, err := dim.NewPostgresDatabase(config.Database)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// 1. Load Config & DB
+	config, _ := dim.LoadConfig()
+	db, _ := dim.NewPostgresDatabase(config.Database)
 	defer db.Close()
 
-	// 3. Init Router
+	// 2. Setup Router
 	router := dim.NewRouter()
 	router.Use(dim.RecoveryMiddleware)
 	router.Use(dim.LoggerMiddleware)
 
-	// Register Routes
+	// 3. Define Routes
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		dim.Response(w).Ok(dim.Map{"message": "Hello from Dim!"})
+		dim.Response(w).Ok(dim.Map{"message": "Halo, Dunia!"})
 	})
 
-	// Build Router (Optimasi untuk introspeksi)
-	router.Build()
-
-	// 4. Init Console & Run
+	// 4. Run Console
+	router.Build() // Siapkan router untuk introspeksi
 	console := dim.NewConsole(db, router, config)
 	console.RegisterBuiltInCommands()
 
-	// Menjalankan aplikasi via CLI
-	// Default: menjalankan server (serve)
+	// Menjalankan aplikasi
 	if err := console.Run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
 }
 ```
 
-## CLI & Console
+## CLI Tools
 
-Framework dim dilengkapi dengan CLI bawaan untuk memudahkan operasional. Setelah setup di atas, Anda dapat menggunakan perintah berikut:
+Dim menyertakan tool CLI untuk membantu workflow development Anda sehari-hari.
 
 ```bash
-# Menjalankan Server (Default)
-go run main.go
-go run main.go serve -port 3000
+# Menjalankan Server
+go run main.go serve
 
-# Manajemen Database
-go run main.go migrate              # Jalankan pending migrations
-go run main.go migrate:list         # Cek status migrasi
-go run main.go migrate:rollback     # Batalkan migrasi terakhir
+# Membuat File Migrasi Baru (Timestamped)
+go run main.go make:migration create_users_table
 
-# Introspeksi Route
-go run main.go route:list           # Lihat semua route yang terdaftar
+# Menjalankan Migrasi Database
+go run main.go migrate
 
-# Bantuan
+# Melihat Status Migrasi
+go run main.go migrate:list
+
+# Melihat Daftar Route
+go run main.go route:list
+
+# Bantuan Lengkap
 go run main.go help
 ```
 
-## Modul Inti
+## Fitur Populer
 
-### Routing & Middleware
-Dim menyediakan API yang *fluent* untuk mendefinisikan route dan grup. Middleware dapat diterapkan secara global, per grup, atau spesifik untuk route tertentu.
+### 1. Database Migrations
+Tidak perlu tool eksternal atau file `.sql` manual. Migrasi ditulis dalam Go, menggunakan `init()` function untuk registrasi otomatis, dan mendukung timestamp versioning.
 
-```go
-// Middleware Grup
-adminGroup := router.Group("/admin", dim.RequireAuth(jwtManager))
+### 2. Smart Logging
+Framework ini peduli pada keamanan data log Anda. Query database yang mengandung field sensitif seperti `password`, `token`, atau `api_key` akan otomatis disensor (`*****`) sebelum dicetak ke log.
 
-// Middleware Spesifik Route
-router.Post("/upload", uploadHandler, RateLimitMiddleware)
-```
-
-### Database & Observability
-Framework ini menyertakan *database tracer* yang kuat yang secara otomatis mencatat query database sambil melindungi informasi sensitif (seperti password, token, dan email).
-
-```go
-// Pada konfigurasi database Anda
-connConfig, _ := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
-// Tracer akan otomatis terpasang jika Anda menggunakan utilitas database dim
-```
-
-**Logika Masking:**
-Setiap query yang mengandung kata kunci sensitif (`password`, `email`, `token`, `secret`, `api_key`) akan secara otomatis menyembunyikan argumennya menjadi `*****` di dalam log untuk mencegah kebocoran data.
-
-### Utilitas JSON:API
-Memudahkan penanganan endpoint *list* yang kompleks dengan standar pagination, filtering, dan sorting.
-
-```go
-// Secara otomatis memparsing query params: ?page[number]=1&page[size]=10&sort=-created_at
-pagination := dim.GetPagination(r)
-filters := dim.GetFilter(r)
-sorts := dim.GetSort(r)
-```
-
-### Static Files & SPA Support
-Dim memudahkan integrasi dengan frontend modern (React, Vue, Svelte) atau sekadar menyajikan aset statis menggunakan interface `fs.FS` (mendukung folder lokal maupun `embed`).
-
-**Static Assets:**
-```go
-// Menggunakan folder lokal
-router.Static("/public/", os.DirFS("./assets"))
-
-// Menggunakan embed (Single Binary)
-//go:embed assets/*
-var assetsFS embed.FS
-router.Static("/public/", assetsFS)
-```
-
-**Single Page Application (SPA):**
-Menangani fallback routing sisi klien (misal: user refresh di `/dashboard` tidak akan 404, tapi kembali ke `index.html`).
-```go
-// Pastikan route API didefinisikan SEBELUM memanggil SPA
-router.Group("/api", apiHandler)
-
-// Contoh 1: Menggunakan folder lokal (development)
-router.SPA(os.DirFS("./dist"), "index.html")
-
-// Contoh 2: Menggunakan embed (production - Single Binary)
-//go:embed dist/*
-var distFS embed.FS
-// Gunakan fs.Sub agar root FS langsung mengarah ke isi folder dist
-rootFS, _ := fs.Sub(distFS, "dist")
-router.SPA(rootFS, "index.html")
-```
-
-### File Handling
-Utilitas bawaan untuk menangani upload file secara aman.
-
-```go
-file, header, err := dim.GetFile(r, "avatar")
-if err != nil {
-    // handle error
-}
-// Validasi dan simpan file...
-```
+### 3. SPA & Static Files
+Dim memudahkan integrasi dengan frontend modern (React, Vue, Svelte). Method `router.SPA()` menangani fallback routing di sisi klien sehingga user yang me-refresh halaman `/dashboard` tidak akan terkena 404 error.
 
 ## Kontribusi
 
-Kontribusi sangat diterima! Pastikan setiap fitur baru yang Anda buat disertai dengan *unit test* yang sesuai.
+Project ini dikembangkan secara terbuka. Jika Anda menemukan bug atau memiliki ide untuk perbaikan, silakan buka Issue atau kirimkan Pull Request.
 
 ## Lisensi
 

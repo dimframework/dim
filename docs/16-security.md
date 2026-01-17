@@ -153,7 +153,7 @@ passwordHash := password
 Gunakan `PasswordValidator` bawaan untuk validasi kekuatan password yang mudah dan dapat dikonfigurasi.
 
 ```go
-import "github.com/nuradiyana/dim"
+import "github.com/dimframework/dim"
 
 // Cara 1: Gunakan validasi default (cara termudah)
 // (Minimal 8 karakter, 1 huruf besar, 1 huruf kecil, 1 angka, 1 simbol)

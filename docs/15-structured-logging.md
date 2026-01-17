@@ -64,7 +64,7 @@ Cara paling umum adalah membuat *logger* JSON yang menulis ke *standard output*.
 ```go
 import (
     "log/slog"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 func main() {
@@ -127,7 +127,7 @@ package main
 
 import (
     "log/slog"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 var logger *slog.Logger
@@ -666,7 +666,7 @@ package main
 import (
     "log/slog"
     "os"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 var logger *slog.Logger

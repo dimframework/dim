@@ -38,7 +38,7 @@ package main
 import (
     "embed"
     "io/fs"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 //go:embed dist/*

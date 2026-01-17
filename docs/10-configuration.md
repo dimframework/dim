@@ -478,7 +478,7 @@ package main
 
 import (
     "log"
-    "github.com/nuradiyana/dim"
+    "github.com/dimframework/dim"
 )
 
 func main() {
