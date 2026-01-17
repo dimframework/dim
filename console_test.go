@@ -108,6 +108,7 @@ func TestConsoleRegisterBuiltInCommands(t *testing.T) {
 		"migrate:list",
 		"route:list",
 		"help",
+		"make:migration",
 	}
 
 	for _, cmdName := range expectedCommands {

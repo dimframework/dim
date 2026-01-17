@@ -1,4 +1,4 @@
-module github.com/nuradiyana/dim
+module github.com/dimframework/dim
 
 go 1.25.4
 

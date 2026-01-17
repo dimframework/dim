@@ -250,7 +250,7 @@ func (c *MakeMigrationCommand) Execute(ctx *CommandContext) error {
 	fmt.Printf("✓ Migration created: %s\n", filepath)
 	fmt.Printf("  Version: %s\n", version)
 	fmt.Println("\nDon't forget to import this package in your main.go to register it:")
-	fmt.Printf("  import _ \"github.com/nuradiyana/dimulai/%s\"\n", c.dir)
+	fmt.Printf("  import _ \"github.com/dimframework/dimulai/%s\"\n", c.dir)
 
 	return nil
 }
@@ -269,7 +269,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nuradiyana/dim"
+	"github.com/dimframework/dim"
 )
 
 func init() {

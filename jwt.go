@@ -122,7 +122,7 @@ func (m *JWTManager) GenerateAccessToken(userID string, email string, extraClaim
 	// Logika saat ini menggunakan "default" yang berasal dari PrivateKey. Implementasi nyata mungkin menggunakan KID tertentu.
 	// Demi kesederhanaan, kita tidak menyetel KID di header untuk saat ini kecuali kita mengimplementasikan manajemen rotasi penuh untuk Signing Key.
 	// Namun untuk pencocokan validasi, jika kita memiliki beberapa kunci validasi, kita memerlukan KID.
-	// Ini hanya jika kita berada dalam fase rotasi. Untuk saat ini, mari kita buat sederhana. 
+	// Ini hanya jika kita berada dalam fase rotasi. Untuk saat ini, mari kita buat sederhana.
 	// Standar JWT menggunakan header 'kid'.
 	// Kita asumsikan kunci aktif saat ini tidak memiliki KID tertentu atau "default".
 

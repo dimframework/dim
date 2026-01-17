@@ -70,9 +70,9 @@ func TestAllowBearerToken(t *testing.T) {
 // Tests for the new `RequireAuth` function (previously `RequireAuthWithManager`)
 func TestRequireAuthValid(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 	token, _ := jwtManager.GenerateAccessToken("1", "test@example.com", nil)
@@ -98,9 +98,9 @@ func TestRequireAuthValid(t *testing.T) {
 
 func TestRequireAuthInvalid(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 	authMiddleware := RequireAuth(jwtManager)
@@ -120,9 +120,9 @@ func TestRequireAuthInvalid(t *testing.T) {
 // Tests for the new `OptionalAuth` function (previously `OptionalAuthWithManager`)
 func TestOptionalAuthNoToken(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 	authMiddleware := OptionalAuth(jwtManager)
@@ -145,9 +145,9 @@ func TestOptionalAuthNoToken(t *testing.T) {
 
 func TestOptionalAuthValidToken(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 	token, _ := jwtManager.GenerateAccessToken("1", "test@example.com", nil)

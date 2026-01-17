@@ -101,8 +101,8 @@ func TestHelpCommand_Execute_MixedCommands(t *testing.T) {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
-	// Verify total commands (6 built-in + 1 custom)
-	expectedCount := 7 // serve, migrate, migrate:rollback, migrate:list, route:list, help, custom
+	// Verify total commands (7 built-in + 1 custom)
+	expectedCount := 8 // serve, migrate, migrate:rollback, migrate:list, route:list, help, make:migration, custom
 	if len(console.commands) != expectedCount {
 		t.Errorf("Expected %d commands, got %d", expectedCount, len(console.commands))
 	}
@@ -167,7 +167,7 @@ func TestHelpCommand_MixedBuiltInAndCustomSorted(t *testing.T) {
 	}
 
 	// Verify all commands are registered
-	expectedTotal := 6 + len(customCommands) // 6 built-in + custom
+	expectedTotal := 7 + len(customCommands) // 7 built-in + custom
 	if len(console.commands) != expectedTotal {
 		t.Errorf("Expected %d total commands, got %d", expectedTotal, len(console.commands))
 	}

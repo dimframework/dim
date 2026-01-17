@@ -30,7 +30,7 @@ type Router struct {
 	cachedHandler http.Handler
 	initialized   bool
 	lock          sync.RWMutex
-	routes        []RouteInfo                                    // Semua route yang terdaftar
+	routes        []RouteInfo                               // Semua route yang terdaftar
 	routeCache    *cache.InMemoryCache[string, []RouteInfo] // Cache untuk GetRoutes()
 }
 
@@ -217,11 +217,11 @@ func (r *Router) Static(prefix string, root fs.FS, middleware ...MiddlewareFunc)
 	finalHandler := func(w http.ResponseWriter, req *http.Request) {
 		// Security Headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		
+
 		// Catatan: Caching strategy untuk static assets biasanya tergantung pada
 		// apakah file memiliki hash di namanya. Kita biarkan default browser/server
 		// atau bisa diatur via middleware tambahan.
-		
+
 		handler.ServeHTTP(w, req)
 	}
 
@@ -245,7 +245,7 @@ func (r *Router) SPA(root fs.FS, index string, middleware ...MiddlewareFunc) {
 
 		// Coba buka file
 		f, err := root.Open(path)
-		
+
 		// Jika file tidak ada atau request adalah direktori, sajikan index.html
 		isDir := false
 		if err == nil {
@@ -268,7 +268,7 @@ func (r *Router) SPA(root fs.FS, index string, middleware ...MiddlewareFunc) {
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0")
 			w.Header().Set("Pragma", "no-cache")
 			w.Header().Set("Expires", "0")
-			
+
 			w.Write(indexContent)
 			return
 		}
