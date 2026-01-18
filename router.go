@@ -2,7 +2,6 @@ package dim
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"reflect"
@@ -498,6 +497,13 @@ func getFunctionName(fn interface{}) string {
 		fullName = fullName[lastSlash+1:]
 	}
 
+	// Clean up -fm suffix (func method)
+	fullName = strings.TrimSuffix(fullName, "-fm")
+
+	// Clean up pointer receiver syntax (*Type) -> Type
+	fullName = strings.ReplaceAll(fullName, "(*", "")
+	fullName = strings.ReplaceAll(fullName, ")", "")
+
 	// Check if this is an anonymous function
 	// Pattern: package.Type.MethodName.func1 or package.FunctionName.func1
 	if strings.Contains(fullName, ".func") {
@@ -508,7 +514,8 @@ func getFunctionName(fn interface{}) string {
 			nameParts := strings.Split(parts[0], ".")
 			if len(nameParts) > 0 {
 				parentName := nameParts[len(nameParts)-1]
-				return fmt.Sprintf("<anonymous in %s>", parentName)
+				// Clean output: just show the parent function name for middleware factories
+				return parentName
 			}
 		}
 		return "<anonymous>"

@@ -456,3 +456,51 @@ func TestRouter_GetRoutes_AfterNewRegistration(t *testing.T) {
 		t.Fatalf("Expected 2 routes after new registration, got %d", len(routes))
 	}
 }
+
+type TestHandler struct{}
+
+func (h *TestHandler) Handle(w http.ResponseWriter, r *http.Request) {}
+func (h TestHandler) Run(w http.ResponseWriter, r *http.Request)     {}
+
+func TestGetFunctionName(t *testing.T) {
+	// 1. Test Regular Function
+	funcName := getFunctionName(TestNewRouterBasicRoute)
+	if funcName != "dim.TestNewRouterBasicRoute" {
+		t.Errorf("Expected 'dim.TestNewRouterBasicRoute', got '%s'", funcName)
+	}
+
+	// 2. Test Struct Method (Pointer Receiver)
+	h := &TestHandler{}
+	methodName := getFunctionName(h.Handle)
+	// Should be cleaned from (*TestHandler).Handle-fm -> TestHandler.Handle
+	expected := "dim.TestHandler.Handle"
+	if methodName != expected {
+		t.Errorf("Expected '%s', got '%s'", expected, methodName)
+	}
+
+	// 3. Test Struct Method (Value Receiver)
+	methodNameVal := getFunctionName(h.Run)
+	// Should be cleaned from TestHandler.Run-fm -> TestHandler.Run
+	expectedVal := "dim.TestHandler.Run"
+	if methodNameVal != expectedVal {
+		t.Errorf("Expected '%s', got '%s'", expectedVal, methodNameVal)
+	}
+}
+
+func TestRouter_GetRoutes_CleanerNames(t *testing.T) {
+	router := NewRouter()
+	handler := &TestHandler{}
+
+	router.Get("/clean", handler.Handle)
+
+	routes := router.GetRoutes()
+	if len(routes) != 1 {
+		t.Fatalf("Expected 1 route, got %d", len(routes))
+	}
+
+	route := routes[0]
+	expectedHandler := "dim.TestHandler.Handle"
+	if route.Handler != expectedHandler {
+		t.Errorf("Expected handler name '%s', got '%s'", expectedHandler, route.Handler)
+	}
+}
