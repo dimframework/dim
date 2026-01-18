@@ -79,7 +79,7 @@ func DropPasswordResetTokensTable(pool *pgxpool.Pool) error {
 func CreateTokenBlocklistTable(pool *pgxpool.Pool) error {
 	_, err := pool.Exec(context.Background(), `
 		CREATE UNLOGGED TABLE IF NOT EXISTS token_blocklist (
-			jti VARCHAR(255) PRIMARY KEY,
+			identifier VARCHAR(255) PRIMARY KEY,
 			expires_at TIMESTAMP NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_token_blocklist_expires_at ON token_blocklist(expires_at);

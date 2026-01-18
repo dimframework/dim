@@ -47,19 +47,21 @@ func AllowBearerToken() MiddlewareFunc {
 
 // RequireAuth adalah middleware yang aman dan direkomendasikan untuk mewajibkan dan memverifikasi token JWT yang valid.
 // Middleware ini menggunakan JWTManager untuk memvalidasi token dan menempatkan info pengguna ke dalam konteks.
+// Juga dapat mengecek TokenBlocklist jika disediakan (opsional).
 // Mengembalikan 401 Unauthorized jika token tidak ada, tidak valid, atau kedaluwarsa.
 //
 // Parameters:
 //   - jwtManager: *JWTManager untuk verifikasi token.
+//   - blocklist: TokenBlocklist interface (opsional, pass nil jika tidak digunakan).
 //
 // Returns:
 //   - MiddlewareFunc: Middleware yang memberlakukan autentikasi aman.
 //
 // Example:
 //
-//	router.Get("/protected", handler, RequireAuth(jwtManager))
+//	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist))
 //	// Di dalam handler, gunakan GetUser(req) untuk mendapatkan pengguna yang terautentikasi.
-func RequireAuth(jwtManager *JWTManager) MiddlewareFunc {
+func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist) MiddlewareFunc {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			token, ok := GetAuthToken(r)
@@ -88,6 +90,26 @@ func RequireAuth(jwtManager *JWTManager) MiddlewareFunc {
 				userID = fmt.Sprintf("%.0f", v)
 			default:
 				userID = fmt.Sprintf("%v", v)
+			}
+
+			// Check Blocklist if provided
+			if blocklist != nil {
+				// Coba ambil sessionID ('sid') dari claims
+				if sid, ok := claims["sid"].(string); ok && sid != "" {
+					revoked, err := blocklist.IsRevoked(r.Context(), sid)
+					if err != nil {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						JsonError(w, http.StatusInternalServerError, "Gagal memverifikasi status token", nil)
+						return
+					}
+					if revoked {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusUnauthorized)
+						JsonError(w, http.StatusUnauthorized, "Sesi telah berakhir (Logged out)", nil)
+						return
+					}
+				}
 			}
 
 			// Extract Email from claims

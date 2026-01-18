@@ -9,15 +9,15 @@ import (
 )
 
 // TokenBlocklist mendefinisikan interface untuk mekanisme pencabutan token (denylist).
-// Digunakan untuk menyimpan JTI (JWT ID) dari token yang di-invalidate sebelum waktunya (Logout, Ban).
+// Digunakan untuk menyimpan identifier (JTI atau Session ID) dari token yang di-invalidate sebelum waktunya.
 type TokenBlocklist interface {
-	// Invalidate memasukkan token ke daftar hitam.
-	// jti: JWT ID unique identifier.
+	// Invalidate memasukkan token/session ke daftar hitam.
+	// identifier: Unique identifier (bisa JTI atau SID).
 	// expiresIn: Sisa durasi hidup token tersebut (sampai exp).
-	Invalidate(ctx context.Context, jti string, expiresIn time.Duration) error
+	Invalidate(ctx context.Context, identifier string, expiresIn time.Duration) error
 
-	// IsRevoked mengecek apakah token ada di daftar hitam dan belum expired.
-	IsRevoked(ctx context.Context, jti string) (bool, error)
+	// IsRevoked mengecek apakah identifier ada di daftar hitam dan belum expired.
+	IsRevoked(ctx context.Context, identifier string) (bool, error)
 }
 
 // --- InMemory Implementation ---
@@ -38,15 +38,15 @@ func NewInMemoryBlocklist() *InMemoryBlocklist {
 	}
 }
 
-func (m *InMemoryBlocklist) Invalidate(ctx context.Context, jti string, expiresIn time.Duration) error {
+func (m *InMemoryBlocklist) Invalidate(ctx context.Context, identifier string, expiresIn time.Duration) error {
 	// Kita simpan waktu kedaluwarsa token di value cache untuk validasi manual
 	// Meskipun goreus cache memiliki TTL sendiri (7 hari), token mungkin expire lebih cepat (misal 15 menit).
-	m.tokens.Set(ctx, jti, time.Now().Add(expiresIn))
+	m.tokens.Set(ctx, identifier, time.Now().Add(expiresIn))
 	return nil
 }
 
-func (m *InMemoryBlocklist) IsRevoked(ctx context.Context, jti string) (bool, error) {
-	deadline, exists := m.tokens.Get(ctx, jti)
+func (m *InMemoryBlocklist) IsRevoked(ctx context.Context, identifier string) (bool, error) {
+	deadline, exists := m.tokens.Get(ctx, identifier)
 	if !exists {
 		return false, nil
 	}
@@ -79,7 +79,7 @@ func NewPostgresBlocklist(db Database) *PostgresBlocklist {
 func (p *PostgresBlocklist) InitSchema(ctx context.Context) error {
 	query := `
 		CREATE UNLOGGED TABLE IF NOT EXISTS token_blocklist (
-			jti VARCHAR(255) PRIMARY KEY,
+			identifier VARCHAR(255) PRIMARY KEY,
 			expires_at TIMESTAMP NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_token_blocklist_expires_at ON token_blocklist(expires_at);
@@ -87,17 +87,17 @@ func (p *PostgresBlocklist) InitSchema(ctx context.Context) error {
 	return p.db.Exec(ctx, query)
 }
 
-func (p *PostgresBlocklist) Invalidate(ctx context.Context, jti string, expiresIn time.Duration) error {
-	query := `INSERT INTO token_blocklist (jti, expires_at) VALUES ($1, $2)`
+func (p *PostgresBlocklist) Invalidate(ctx context.Context, identifier string, expiresIn time.Duration) error {
+	query := `INSERT INTO token_blocklist (identifier, expires_at) VALUES ($1, $2)`
 	// Gunakan time.Now().UTC() untuk konsistensi
-	return p.db.Exec(ctx, query, jti, time.Now().UTC().Add(expiresIn))
+	return p.db.Exec(ctx, query, identifier, time.Now().UTC().Add(expiresIn))
 }
 
-func (p *PostgresBlocklist) IsRevoked(ctx context.Context, jti string) (bool, error) {
+func (p *PostgresBlocklist) IsRevoked(ctx context.Context, identifier string) (bool, error) {
 	var exists bool
 	// Cek existensi token yang masil valid (expires_at > NOW)
-	query := `SELECT EXISTS(SELECT 1 FROM token_blocklist WHERE jti = $1 AND expires_at > NOW())`
-	err := p.db.QueryRow(ctx, query, jti).Scan(&exists)
+	query := `SELECT EXISTS(SELECT 1 FROM token_blocklist WHERE identifier = $1 AND expires_at > NOW())`
+	err := p.db.QueryRow(ctx, query, identifier).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to check blocklist: %w", err)
 	}
