@@ -76,7 +76,7 @@ func TestLoginSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service, err := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
 	if err != nil {
 		t.Fatalf("NewAuthService error: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestLoginInvalidPassword(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service, err := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
 	if err != nil {
 		t.Fatalf("NewAuthService error: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRefreshTokenSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service, err := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
 	if err != nil {
 		t.Fatalf("NewAuthService error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestLogoutSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service, err := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
 	if err != nil {
 		t.Fatalf("NewAuthService error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRequestPasswordResetSuccess(t *testing.T) {
 		Password: hashedPassword,
 	})
 
-	service, err := NewAuthService(userStore, tokenStore, config)
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
 	if err != nil {
 		t.Fatalf("NewAuthService error: %v", err)
 	}
