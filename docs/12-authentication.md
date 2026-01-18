@@ -94,10 +94,47 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // 3. Generate Access Token
-    // Parameter: UserID (string), Email (string), Extra Claims (map atau nil)
+    // 3. Generate Access Token & Refresh Token
+    // Framework dim sekarang menggunakan Session ID (sid) binding.
+    // Kami merekomendasikan menggunakan `AuthService.Login()` yang menangani ini secara otomatis.
+    
+    // Contoh penggunaan low-level (jika tidak menggunakan AuthService):
+    sessionID := dim.NewUUID()
+    
     accessToken, err := jwtManager.GenerateAccessToken(
         fmt.Sprintf("%d", user.ID), 
+        user.Email,
+        sessionID, // Parameter Session ID
+        nil,       // Extra claims
+    )
+    
+    refreshToken, err := jwtManager.GenerateRefreshToken(
+        fmt.Sprintf("%d", user.ID),
+        sessionID,
+    )
+    
+    // ... simpan refresh token dsb ...
+}
+```
+
+> **Rekomendasi:** Gunakan `dim.AuthService` yang sudah membungkus logika ini (Login, Generate Token, Simpan Refresh Token, Logout) dengan aman.
+
+---
+
+## Melindungi Route
+
+Gunakan middleware `RequireAuth`.
+
+```go
+// Inisialisasi Middleware (sekarang membutuhkan blocklist opsional)
+// Jika Anda tidak menggunakan blocklist, pass 'nil'
+authMiddleware := dim.RequireAuth(jwtManager, nil)
+
+// Atau dengan Blocklist (untuk fitur logout langsung)
+authMiddleware := dim.RequireAuth(jwtManager, blocklistStore)
+
+router.Get("/profile", profileHandler, authMiddleware)
+```
         user.Email, 
         nil,
     )
