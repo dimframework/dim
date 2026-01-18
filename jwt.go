@@ -88,17 +88,19 @@ func NewJWTManager(config *JWTConfig) (*JWTManager, error) {
 // Parameters:
 //   - userID: ID unik pengguna (disimpan dalam claim 'sub')
 //   - email: email pengguna (disimpan dalam claim 'email')
+//   - sessionID: ID unik sesi (disimpan dalam claim 'sid')
 //   - extraClaims: map tambahan claims custom yang ingin dimasukkan
 //
 // Returns:
 //   - string: signed JWT string
 //   - error: error jika signing gagal
-func (m *JWTManager) GenerateAccessToken(userID string, email string, extraClaims map[string]interface{}) (string, error) {
+func (m *JWTManager) GenerateAccessToken(userID string, email string, sessionID string, extraClaims map[string]interface{}) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(m.config.AccessTokenExpiry)
 
 	claims := jwt.MapClaims{
 		"sub":   userID,
+		"sid":   sessionID,
 		"email": email,
 		"iat":   now.Unix(),
 		"exp":   expiresAt.Unix(),
@@ -134,27 +136,32 @@ func (m *JWTManager) GenerateAccessToken(userID string, email string, extraClaim
 //
 // Parameters:
 //   - userID: ID unik pengguna (disimpan dalam claim 'sub')
+//   - sessionID: ID unik sesi (disimpan dalam claim 'sid')
 //
 // Returns:
 //   - string: signed JWT string
 //   - error: error jika signing gagal
-func (m *JWTManager) GenerateRefreshToken(userID string) (string, error) {
+func (m *JWTManager) GenerateRefreshToken(userID, sessionID string) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(m.config.RefreshTokenExpiry)
 
-	claims := jwt.RegisteredClaims{
-		Subject:   userID,
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(expiresAt),
-		NotBefore: jwt.NewNumericDate(now),
+	// Gunakan MapClaims agar bisa menambahkan custom claim 'sid'
+	claims := jwt.MapClaims{
+		"sub": userID,
+		"sid": sessionID,
+		"iat": now.Unix(),
+		"exp": expiresAt.Unix(),
+		"nbf": now.Unix(),
 	}
 
+	// Determine Signing Method
 	method := jwt.GetSigningMethod(m.config.SigningMethod)
 	if method == nil {
 		return "", fmt.Errorf("invalid signing method: %s", m.config.SigningMethod)
 	}
 
 	token := jwt.NewWithClaims(method, claims)
+
 	return token.SignedString(m.signingKey)
 }
 
@@ -220,7 +227,7 @@ func (m *JWTManager) VerifyToken(tokenString string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// VerifyRefreshToken memverifikasi refresh token dan mengembalikan userID.
+// VerifyRefreshToken memverifikasi refresh token dan mengembalikan userID dan sessionID.
 // Memastikan token valid dan belum kedaluwarsa.
 //
 // Parameters:
@@ -228,21 +235,32 @@ func (m *JWTManager) VerifyToken(tokenString string) (jwt.MapClaims, error) {
 //
 // Returns:
 //   - string: userID yang tersimpan dalam claim 'sub'
+//   - string: sessionID yang tersimpan dalam claim 'sid'
 //   - error: error jika token tidak valid
-func (m *JWTManager) VerifyRefreshToken(tokenString string) (string, error) {
-	var claims jwt.RegisteredClaims
+func (m *JWTManager) VerifyRefreshToken(tokenString string) (string, string, error) {
+	// Gunakan MapClaims karena kita menggunakan sid (custom claim)
+	claims := jwt.MapClaims{}
 
-	token, err := jwt.ParseWithClaims(tokenString, &claims, m.verifyKeyFunc)
-
+	token, err := jwt.ParseWithClaims(tokenString, claims, m.verifyKeyFunc)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse token: %w", err)
+		return "", "", fmt.Errorf("failed to parse token: %w", err)
 	}
 
 	if !token.Valid {
-		return "", fmt.Errorf("invalid token")
+		return "", "", fmt.Errorf("invalid token")
 	}
 
-	return claims.Subject, nil
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return "", "", fmt.Errorf("invalid token claims: missing sub")
+	}
+
+	sid, ok := claims["sid"].(string)
+	if !ok {
+		sid = ""
+	}
+
+	return sub, sid, nil
 }
 
 // GetTokenExpiry mengembalikan waktu expiry dari token.

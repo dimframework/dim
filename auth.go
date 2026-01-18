@@ -36,6 +36,7 @@ type ClaimsProvider func(ctx context.Context, user Authenticatable) (map[string]
 type AuthService struct {
 	userStore      AuthUserStore
 	tokenStore     TokenStore
+	blocklist      TokenBlocklist
 	jwtManager     *JWTManager
 	pwValidator    *PasswordValidator
 	claimsProvider ClaimsProvider
@@ -45,6 +46,7 @@ type AuthService struct {
 func NewAuthService(
 	userStore AuthUserStore,
 	tokenStore TokenStore,
+	blocklist TokenBlocklist,
 	jwtConfig *JWTConfig,
 ) (*AuthService, error) {
 	jwtManager, err := NewJWTManager(jwtConfig)
@@ -54,6 +56,7 @@ func NewAuthService(
 	return &AuthService{
 		userStore:   userStore,
 		tokenStore:  tokenStore,
+		blocklist:   blocklist,
 		jwtManager:  jwtManager,
 		pwValidator: NewPasswordValidator(),
 	}, nil
@@ -111,13 +114,16 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 		}
 	}
 
+	// Generate Session ID (UUID)
+	sessionID := NewUuid().String()
+
 	// Generate tokens
-	accessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), extraClaims)
+	accessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat access token", 500)
 	}
 
-	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID())
+	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID(), sessionID)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
@@ -150,7 +156,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 //   - error: error jika token tidak valid, kadaluarsa, atau sudah dibatalkan
 func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) (string, string, error) {
 	// Verify refresh token
-	userID, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
+	userID, sessionID, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
 		return "", "", NewAppError("Refresh token tidak valid", 401)
 	}
@@ -188,13 +194,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 	}
 
 	// Generate new access token
-	newAccessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), extraClaims)
+	newAccessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat access token", 500)
 	}
 
 	// Generate new refresh token
-	newRefreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID())
+	newRefreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID(), sessionID)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
@@ -325,13 +331,33 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetTokenStr, newPassw
 }
 
 // Logout mengeluarkan pengguna dengan membatalkan (revoke) refresh token mereka.
-// Akses token yang masih hidup tetap valid sampai expired, tetapi tidak dapat diperbarui.
+// Karena kita menggunakan Session ID (sid), kita juga mem-blacklist sid tersebut
+// agar Access Token yang masih hidup (yang memiliki sid sama) ikut tidak valid.
 func (s *AuthService) Logout(ctx context.Context, refreshTokenStr string) error {
 	if refreshTokenStr == "" {
 		return NewAppError("Refresh token diperlukan", 400)
 	}
 
-	// Revoke refresh token
+	// 1. Dapatkan Session ID dari Refresh Token
+	// Kita abaikan userID karena tidak digunakan disini
+	_, sid, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
+	if err != nil {
+		return NewAppError("Refresh token tidak valid atau expired", 400)
+	}
+
+	// 2. Blacklist Session ID jika ada
+	if sid != "" && s.blocklist != nil {
+		// Kita set expiry blocklist sama dengan durasi Access Token (misal 15 menit),
+		// atau cukup lama. Karena kita tidak tahu persis sisa umur akses tokennya,
+		// kita gunakan default expiry yang aman, misal durasi access token default system.
+		// Untuk amannya, kita set 1 jam.
+		if err := s.blocklist.Invalidate(ctx, sid, 1*time.Hour); err != nil {
+			// Log error tapi jangan gagalkan logout, lanjut ke revoke refresh token
+			fmt.Printf("Warning: failed to blacklist session %s: %v\n", sid, err)
+		}
+	}
+
+	// 3. Revoke refresh token (Standard Procedure)
 	refreshTokenHash := GenerateTokenHash(refreshTokenStr)
 	if err := s.tokenStore.RevokeRefreshToken(ctx, refreshTokenHash); err != nil {
 		return NewAppError("Gagal logout", 500)
