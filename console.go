@@ -35,7 +35,7 @@ type CommandContext struct {
 	Args []string
 
 	// DB adalah database instance
-	DB *PostgresDatabase
+	DB Database
 
 	// Router adalah router instance
 	Router *Router
@@ -56,7 +56,7 @@ type CommandContext struct {
 // Console mengelola semua registered commands dan menangani parsing/eksekusi.
 type Console struct {
 	commands map[string]Command
-	db       *PostgresDatabase
+	db       Database
 	router   *Router
 	config   *Config
 	out      io.Writer // Output writer (default: os.Stdout)
@@ -78,7 +78,7 @@ type Console struct {
 //	console := dim.NewConsole(db, router, config)
 //	console.RegisterBuiltInCommands()
 //	console.Run(os.Args[1:])
-func NewConsole(db *PostgresDatabase, router *Router, config *Config) *Console {
+func NewConsole(db Database, router *Router, config *Config) *Console {
 	return &Console{
 		commands: make(map[string]Command),
 		db:       db,
