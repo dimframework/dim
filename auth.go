@@ -133,7 +133,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	refreshTokenEntity := &RefreshToken{
 		UserID:    user.GetID(),
 		TokenHash: refreshTokenHash,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second),
 	}
 
 	if err := s.tokenStore.SaveRefreshToken(ctx, refreshTokenEntity); err != nil {
@@ -213,7 +213,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 	newRefreshTokenEntity := &RefreshToken{
 		UserID:    user.GetID(),
 		TokenHash: newRefreshTokenHash,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second),
 	}
 
 	if err := s.tokenStore.SaveRefreshToken(ctx, newRefreshTokenEntity); err != nil {

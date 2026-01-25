@@ -1,6 +1,8 @@
 package dim
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -101,6 +103,7 @@ func (m *JWTManager) GenerateAccessToken(userID string, email string, sessionID 
 	claims := jwt.MapClaims{
 		"sub":   userID,
 		"sid":   sessionID,
+		"jti":   NewUuid().String(),
 		"email": email,
 		"iat":   now.Unix(),
 		"exp":   expiresAt.Unix(),
@@ -149,6 +152,7 @@ func (m *JWTManager) GenerateRefreshToken(userID, sessionID string) (string, err
 	claims := jwt.MapClaims{
 		"sub": userID,
 		"sid": sessionID,
+		"jti": NewUuid().String(),
 		"iat": now.Unix(),
 		"exp": expiresAt.Unix(),
 		"nbf": now.Unix(),
@@ -319,7 +323,7 @@ func (m *JWTManager) IsTokenExpired(tokenString string) (bool, error) {
 }
 
 // GenerateTokenHash membuat hash dari token untuk disimpan di database.
-// Menggunakan bcrypt hashing untuk keamanan, bukan actual token.
+// Menggunakan SHA256 hashing (deterministik) agar bisa di-lookup di database.
 //
 // Parameters:
 //   - token: token string yang akan di-hash
@@ -332,12 +336,11 @@ func (m *JWTManager) IsTokenExpired(tokenString string) (bool, error) {
 //	tokenHash := GenerateTokenHash(refreshToken)
 //	// store tokenHash in database instead of actual token
 func GenerateTokenHash(token string) string {
-	hash, _ := HashPassword(token)
-	return hash
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 // VerifyTokenHash memverifikasi token terhadap hash yang tersimpan di database.
-// Menggunakan bcrypt compare untuk aman.
 //
 // Parameters:
 //   - hash: hashed token dari database
@@ -353,5 +356,9 @@ func GenerateTokenHash(token string) string {
 //	  return "token tidak valid"
 //	}
 func VerifyTokenHash(hash, token string) error {
-	return VerifyPassword(hash, token)
+	expected := GenerateTokenHash(token)
+	if hash != expected {
+		return fmt.Errorf("token invalid")
+	}
+	return nil
 }
