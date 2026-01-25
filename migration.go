@@ -4,16 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/jackc/pgx/v5/pgxpool"
+	"regexp"
 )
 
 // Migration represents a single migration
 type Migration struct {
 	Version int64
 	Name    string
-	Up      func(*pgxpool.Pool) error
-	Down    func(*pgxpool.Pool) error
+	Up      func(Database) error
+	Down    func(Database) error
 }
 
 // MigrationHistory represents the migration history table
@@ -23,11 +22,19 @@ type MigrationHistory struct {
 }
 
 var migrationRegistry []Migration
+var includeFrameworkMigrations = true
 
 // Register mendaftarkan migration ke global registry.
 // Fungsi ini biasanya dipanggil di dalam fungsi init() pada file migration.
 func Register(m Migration) {
 	migrationRegistry = append(migrationRegistry, m)
+}
+
+// DisableFrameworkMigrations menonaktifkan migrasi bawaan framework (User, Token, RateLimit).
+// Panggil fungsi ini di init() aplikasi jika Anda ingin mendefinisikan skema tabel inti Anda sendiri.
+// Gunakan ini untuk kustomisasi penuh (misal: ID int64, tambah kolom, ganti nama tabel).
+func DisableFrameworkMigrations() {
+	includeFrameworkMigrations = false
 }
 
 // GetRegisteredMigrations mengembalikan semua migration yang terdaftar via Register().
@@ -41,6 +48,7 @@ func GetRegisteredMigrations() []Migration {
 
 // GetFrameworkMigrations mengembalikan semua migrasi bawaan framework dim (User, Token, RateLimit).
 // Migrasi ini mencakup tabel-tabel inti yang diperlukan oleh fitur-fitur framework.
+// Jika DisableFrameworkMigrations() telah dipanggil, fungsi ini mengembalikan slice kosong.
 // Urutan versi:
 // 1. Users
 // 2. Refresh Tokens
@@ -48,6 +56,10 @@ func GetRegisteredMigrations() []Migration {
 // 4. Token Blocklist
 // 5. Rate Limits
 func GetFrameworkMigrations() []Migration {
+	if !includeFrameworkMigrations {
+		return []Migration{}
+	}
+
 	var migrations []Migration
 	migrations = append(migrations, GetUserMigrations()...)
 	migrations = append(migrations, GetTokenMigrations()...)
@@ -60,7 +72,7 @@ func GetFrameworkMigrations() []Migration {
 // Semua migrations di-log menggunakan slog.
 //
 // Parameters:
-//   - db: PostgresDatabase instance untuk execute migration queries
+//   - db: Database instance untuk execute migration queries
 //   - migrations: slice dari Migration structs yang berisi Up dan Down functions
 //
 // Returns:
@@ -72,7 +84,7 @@ func GetFrameworkMigrations() []Migration {
 //	if err != nil {
 //	  log.Fatal(err)
 //	}
-func RunMigrations(db *PostgresDatabase, migrations []Migration) error {
+func RunMigrations(db Database, migrations []Migration) error {
 	// Create migrations table if it doesn't exist
 	if err := ensureMigrationsTable(db); err != nil {
 		return fmt.Errorf("failed to ensure migrations table: %w", err)
@@ -93,7 +105,7 @@ func RunMigrations(db *PostgresDatabase, migrations []Migration) error {
 
 		slog.Info("running migration", "version", migration.Version, "name", migration.Name)
 
-		if err := migration.Up(db.writePool); err != nil {
+		if err := migration.Up(db); err != nil {
 			return fmt.Errorf("migration %d (%s) failed: %w", migration.Version, migration.Name, err)
 		}
 
@@ -112,7 +124,7 @@ func RunMigrations(db *PostgresDatabase, migrations []Migration) error {
 // Menghapus record migration dari migrations table.
 //
 // Parameters:
-//   - db: PostgresDatabase instance untuk execute rollback queries
+//   - db: Database instance untuk execute rollback queries
 //   - migration: Migration struct yang akan di-rollback
 //
 // Returns:
@@ -124,8 +136,8 @@ func RunMigrations(db *PostgresDatabase, migrations []Migration) error {
 //	if err != nil {
 //	  log.Fatal(err)
 //	}
-func RollbackMigration(db *PostgresDatabase, migration Migration) error {
-	if err := migration.Down(db.writePool); err != nil {
+func RollbackMigration(db Database, migration Migration) error {
+	if err := migration.Down(db); err != nil {
 		return fmt.Errorf("rollback failed for migration %d: %w", migration.Version, err)
 	}
 
@@ -139,20 +151,31 @@ func RollbackMigration(db *PostgresDatabase, migration Migration) error {
 }
 
 // ensureMigrationsTable creates the migrations history table
-func ensureMigrationsTable(db *PostgresDatabase) error {
-	_, err := db.writePool.Exec(context.Background(), `
-		CREATE TABLE IF NOT EXISTS migrations (
-			version BIGINT PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			applied_at TIMESTAMP DEFAULT NOW()
-		)
-	`)
-	return err
+func ensureMigrationsTable(db Database) error {
+	var query string
+	if db.DriverName() == "sqlite" {
+		query = `
+			CREATE TABLE IF NOT EXISTS migrations (
+				version INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			)
+		`
+	} else {
+		query = `
+			CREATE TABLE IF NOT EXISTS migrations (
+				version BIGINT PRIMARY KEY,
+				name VARCHAR(255) NOT NULL,
+				applied_at TIMESTAMP DEFAULT NOW()
+			)
+		`
+	}
+	return db.Exec(context.Background(), query)
 }
 
 // getAppliedMigrations retrieves all applied migrations
-func getAppliedMigrations(db *PostgresDatabase) (map[int64]MigrationHistory, error) {
-	rows, err := db.writePool.Query(context.Background(), "SELECT version, name FROM migrations ORDER BY version")
+func getAppliedMigrations(db Database) (map[int64]MigrationHistory, error) {
+	rows, err := db.Query(context.Background(), "SELECT version, name FROM migrations ORDER BY version")
 	if err != nil {
 		return nil, err
 	}
@@ -177,22 +200,25 @@ func getAppliedMigrations(db *PostgresDatabase) (map[int64]MigrationHistory, err
 }
 
 // recordMigration records a migration as applied
-func recordMigration(db *PostgresDatabase, migration Migration) error {
-	_, err := db.writePool.Exec(
-		context.Background(),
-		"INSERT INTO migrations (version, name) VALUES ($1, $2)",
-		migration.Version,
-		migration.Name,
-	)
-	return err
+func recordMigration(db Database, migration Migration) error {
+	query := "INSERT INTO migrations (version, name) VALUES ($1, $2)"
+	if db.DriverName() == "sqlite" {
+		query = rebind(query)
+	}
+	return db.Exec(context.Background(), query, migration.Version, migration.Name)
 }
 
 // removeMigration removes a migration record
-func removeMigration(db *PostgresDatabase, migration Migration) error {
-	_, err := db.writePool.Exec(
-		context.Background(),
-		"DELETE FROM migrations WHERE version = $1",
-		migration.Version,
-	)
-	return err
+func removeMigration(db Database, migration Migration) error {
+	query := "DELETE FROM migrations WHERE version = $1"
+	if db.DriverName() == "sqlite" {
+		query = rebind(query)
+	}
+	return db.Exec(context.Background(), query, migration.Version)
+}
+
+// rebind replaces $1, $2, etc with ? for SQLite compatibility
+func rebind(query string) string {
+	re := regexp.MustCompile(`\$[0-9]+`)
+	return re.ReplaceAllString(query, "?")
 }

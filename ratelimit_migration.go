@@ -2,8 +2,6 @@ package dim
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // GetRateLimitMigrations mengembalikan daftar migrasi terkait rate limit.
@@ -19,21 +17,36 @@ func GetRateLimitMigrations() []Migration {
 	}
 }
 
-// CreateRateLimitsTable membuat tabel UNLOGGED untuk rate limiting.
-func CreateRateLimitsTable(pool *pgxpool.Pool) error {
-	_, err := pool.Exec(context.Background(), `
-		CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
-			key VARCHAR(255) PRIMARY KEY,
-			count INT NOT NULL DEFAULT 0,
-			expires_at TIMESTAMP NOT NULL
-		);
-		CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
-	`)
-	return err
+// CreateRateLimitsTable membuat tabel untuk rate limiting.
+func CreateRateLimitsTable(db Database) error {
+	var query string
+	if db.DriverName() == "sqlite" {
+		query = `
+			CREATE TABLE IF NOT EXISTS rate_limits (
+				key TEXT PRIMARY KEY,
+				count INT NOT NULL DEFAULT 0,
+				expires_at TIMESTAMP NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
+		`
+	} else {
+		query = `
+			CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
+				key VARCHAR(255) PRIMARY KEY,
+				count INT NOT NULL DEFAULT 0,
+				expires_at TIMESTAMP NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
+		`
+	}
+	return db.Exec(context.Background(), query)
 }
 
 // DropRateLimitsTable menghapus tabel rate limits.
-func DropRateLimitsTable(pool *pgxpool.Pool) error {
-	_, err := pool.Exec(context.Background(), "DROP TABLE IF EXISTS rate_limits CASCADE")
-	return err
+func DropRateLimitsTable(db Database) error {
+	query := "DROP TABLE IF EXISTS rate_limits CASCADE"
+	if db.DriverName() == "sqlite" {
+		query = "DROP TABLE IF EXISTS rate_limits"
+	}
+	return db.Exec(context.Background(), query)
 }
