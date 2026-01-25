@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 )
 
 // ServeCommand menjalankan HTTP server dengan konfigurasi yang dapat di-override via flags.
@@ -44,6 +45,6 @@ func (c *ServeCommand) Execute(ctx *CommandContext) error {
 		config.Port = "8080"
 	}
 
-	fmt.Printf("Starting server on port %s\n", config.Port)
+	slog.Info("starting server", "port", config.Port)
 	return StartServer(context.Background(), config, ctx.Router)
 }

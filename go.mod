@@ -3,9 +3,10 @@ module github.com/dimframework/dim
 go 1.25.4
 
 require (
-	github.com/atfromhome/goreus v1.1.0
+	github.com/atfromhome/goreus v1.2.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/mattn/go-sqlite3 v1.14.33
 	golang.org/x/crypto v0.46.0
 )
 
@@ -24,6 +25,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.89.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.54.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.39.0 // indirect
