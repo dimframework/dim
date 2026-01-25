@@ -40,51 +40,36 @@ type TokenStore interface {
 	MarkPasswordResetUsed(ctx context.Context, tokenHash string) error
 }
 
-// PostgresTokenStore is the PostgreSQL implementation of TokenStore
-type PostgresTokenStore struct {
+// DatabaseTokenStore is the SQL implementation of TokenStore (PostgreSQL & SQLite)
+type DatabaseTokenStore struct {
 	db Database
 }
 
-// NewPostgresTokenStore membuat PostgreSQL token store baru.
-// Store ini menangani operasi CRUD untuk refresh tokens dan password reset tokens.
-//
-// Parameters:
-//   - db: Database instance untuk execute queries
-//
-// Returns:
-//   - *PostgresTokenStore: token store instance
-//
-// Example:
-//
-//	tokenStore := NewPostgresTokenStore(db)
-func NewPostgresTokenStore(db Database) *PostgresTokenStore {
-	return &PostgresTokenStore{db: db}
+// NewDatabaseTokenStore creates a new SQL token store.
+// Handles CRUD operations for refresh tokens and password reset tokens.
+func NewDatabaseTokenStore(db Database) *DatabaseTokenStore {
+	return &DatabaseTokenStore{db: db}
 }
 
-// SaveRefreshToken menyimpan refresh token ke database.
-// Token disimpan dengan hash, user_agent, ip_address, dan expiry time.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - token: RefreshToken struct dengan data yang akan disimpan
-//
-// Returns:
-//   - error: error jika INSERT query gagal
-//
-// Example:
-//
-//	err := tokenStore.SaveRefreshToken(ctx, &refreshToken)
-func (s *PostgresTokenStore) SaveRefreshToken(ctx context.Context, token *RefreshToken) error {
-	err := s.db.QueryRow(ctx,
-		`INSERT INTO refresh_tokens (user_id, token_hash, user_agent, ip_address, expires_at, created_at)
+// Deprecated: Use NewDatabaseTokenStore instead
+func NewPostgresTokenStore(db Database) *DatabaseTokenStore {
+	return NewDatabaseTokenStore(db)
+}
+
+// SaveRefreshToken saves a refresh token to the database.
+func (s *DatabaseTokenStore) SaveRefreshToken(ctx context.Context, token *RefreshToken) error {
+	now := time.Now().UTC().Truncate(time.Second)
+	query := `INSERT INTO refresh_tokens (user_id, token_hash, user_agent, ip_address, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, created_at`,
+		 RETURNING id, created_at`
+	
+	err := s.db.QueryRow(ctx, s.db.Rebind(query),
 		token.UserID,
 		token.TokenHash,
 		token.UserAgent,
 		token.IPAddress,
-		token.ExpiresAt,
-		time.Now(),
+		token.ExpiresAt.UTC().Truncate(time.Second),
+		now,
 	).Scan(&token.ID, &token.CreatedAt)
 
 	if err != nil {
@@ -94,26 +79,16 @@ func (s *PostgresTokenStore) SaveRefreshToken(ctx context.Context, token *Refres
 	return nil
 }
 
-// FindRefreshToken mencari refresh token berdasarkan hash.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - tokenHash: hash dari token yang akan dicari
-//
-// Returns:
-//   - *RefreshToken: RefreshToken struct jika ditemukan
-//   - error: error jika token tidak ditemukan atau query gagal
-//
-// Example:
-//
-//	token, err := tokenStore.FindRefreshToken(ctx, tokenHash)
-func (s *PostgresTokenStore) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
+// FindRefreshToken finds a refresh token by hash.
+func (s *DatabaseTokenStore) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
 	token := &RefreshToken{}
-	err := s.db.QueryRow(ctx,
-		`SELECT id, user_id, token_hash, user_agent, ip_address, expires_at, created_at, revoked_at
-		 FROM refresh_tokens WHERE token_hash = $1`,
-		tokenHash,
-	).Scan(&token.ID, &token.UserID, &token.TokenHash, &token.UserAgent, &token.IPAddress, &token.ExpiresAt, &token.CreatedAt, &token.RevokedAt)
+	query := `SELECT id, user_id, token_hash, user_agent, ip_address, expires_at, created_at, revoked_at
+		 FROM refresh_tokens WHERE token_hash = $1`
+	
+	err := s.db.QueryRow(ctx, s.db.Rebind(query), tokenHash).Scan(
+		&token.ID, &token.UserID, &token.TokenHash, &token.UserAgent, &token.IPAddress, 
+		&token.ExpiresAt, &token.CreatedAt, &token.RevokedAt,
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to find refresh token: %w", err)
@@ -122,24 +97,11 @@ func (s *PostgresTokenStore) FindRefreshToken(ctx context.Context, tokenHash str
 	return token, nil
 }
 
-// RevokeRefreshToken membatalkan/revoke refresh token dengan set revoked_at timestamp.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - tokenHash: hash dari token yang akan di-revoke
-//
-// Returns:
-//   - error: error jika UPDATE query gagal
-//
-// Example:
-//
-//	err := tokenStore.RevokeRefreshToken(ctx, tokenHash)
-func (s *PostgresTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
-	err := s.db.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked_at = $1 WHERE token_hash = $2`,
-		time.Now(),
-		tokenHash,
-	)
+// RevokeRefreshToken revokes a refresh token by setting revoked_at timestamp.
+func (s *DatabaseTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	query := `UPDATE refresh_tokens SET revoked_at = $1 WHERE token_hash = $2`
+	
+	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), tokenHash)
 
 	if err != nil {
 		return fmt.Errorf("failed to revoke refresh token: %w", err)
@@ -148,25 +110,11 @@ func (s *PostgresTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash s
 	return nil
 }
 
-// RevokeAllUserTokens membatalkan semua refresh tokens milik pengguna tertentu.
-// Berguna untuk security setelah password reset atau logout dari semua device.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - userID: ID dari user yang token-nya akan di-revoke
-//
-// Returns:
-//   - error: error jika UPDATE query gagal
-//
-// Example:
-//
-//	err := tokenStore.RevokeAllUserTokens(ctx, userID)
-func (s *PostgresTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
-	err := s.db.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL`,
-		time.Now(),
-		userID,
-	)
+// RevokeAllUserTokens revokes all refresh tokens for a specific user.
+func (s *DatabaseTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
+	query := `UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL`
+	
+	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), userID)
 
 	if err != nil {
 		return fmt.Errorf("failed to revoke all user tokens: %w", err)
@@ -175,28 +123,18 @@ func (s *PostgresTokenStore) RevokeAllUserTokens(ctx context.Context, userID str
 	return nil
 }
 
-// SavePasswordResetToken menyimpan password reset token ke database.
-// Token disimpan dengan hash dan expiry time untuk password reset flow.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - token: PasswordResetToken struct dengan data yang akan disimpan
-//
-// Returns:
-//   - error: error jika INSERT query gagal
-//
-// Example:
-//
-//	err := tokenStore.SavePasswordResetToken(ctx, &resetToken)
-func (s *PostgresTokenStore) SavePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
-	err := s.db.QueryRow(ctx,
-		`INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+// SavePasswordResetToken saves a password reset token to the database.
+func (s *DatabaseTokenStore) SavePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
+	now := time.Now().UTC().Truncate(time.Second)
+	query := `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, created_at`,
+		 RETURNING id, created_at`
+	
+	err := s.db.QueryRow(ctx, s.db.Rebind(query),
 		token.UserID,
 		token.TokenHash,
-		token.ExpiresAt,
-		time.Now(),
+		token.ExpiresAt.UTC().Truncate(time.Second),
+		now,
 	).Scan(&token.ID, &token.CreatedAt)
 
 	if err != nil {
@@ -206,26 +144,15 @@ func (s *PostgresTokenStore) SavePasswordResetToken(ctx context.Context, token *
 	return nil
 }
 
-// FindPasswordResetToken mencari password reset token berdasarkan hash.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - tokenHash: hash dari reset token yang akan dicari
-//
-// Returns:
-//   - *PasswordResetToken: PasswordResetToken struct jika ditemukan
-//   - error: error jika token tidak ditemukan atau query gagal
-//
-// Example:
-//
-//	token, err := tokenStore.FindPasswordResetToken(ctx, tokenHash)
-func (s *PostgresTokenStore) FindPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
+// FindPasswordResetToken finds a password reset token by hash.
+func (s *DatabaseTokenStore) FindPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
 	token := &PasswordResetToken{}
-	err := s.db.QueryRow(ctx,
-		`SELECT id, user_id, token_hash, expires_at, created_at, used_at
-		 FROM password_reset_tokens WHERE token_hash = $1`,
-		tokenHash,
-	).Scan(&token.ID, &token.UserID, &token.TokenHash, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt)
+	query := `SELECT id, user_id, token_hash, expires_at, created_at, used_at
+		 FROM password_reset_tokens WHERE token_hash = $1`
+	
+	err := s.db.QueryRow(ctx, s.db.Rebind(query), tokenHash).Scan(
+		&token.ID, &token.UserID, &token.TokenHash, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt,
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to find password reset token: %w", err)
@@ -234,25 +161,11 @@ func (s *PostgresTokenStore) FindPasswordResetToken(ctx context.Context, tokenHa
 	return token, nil
 }
 
-// MarkPasswordResetUsed menandai password reset token sudah digunakan dengan set used_at timestamp.
-// Mencegah reuse dari token yang sama untuk reset password.
-//
-// Parameters:
-//   - ctx: context untuk membatalkan operasi
-//   - tokenHash: hash dari reset token yang akan ditandai sebagai used
-//
-// Returns:
-//   - error: error jika UPDATE query gagal
-//
-// Example:
-//
-//	err := tokenStore.MarkPasswordResetUsed(ctx, tokenHash)
-func (s *PostgresTokenStore) MarkPasswordResetUsed(ctx context.Context, tokenHash string) error {
-	err := s.db.Exec(ctx,
-		`UPDATE password_reset_tokens SET used_at = $1 WHERE token_hash = $2`,
-		time.Now(),
-		tokenHash,
-	)
+// MarkPasswordResetUsed marks a password reset token as used.
+func (s *DatabaseTokenStore) MarkPasswordResetUsed(ctx context.Context, tokenHash string) error {
+	query := `UPDATE password_reset_tokens SET used_at = $1 WHERE token_hash = $2`
+	
+	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), tokenHash)
 
 	if err != nil {
 		return fmt.Errorf("failed to mark password reset token as used: %w", err)
@@ -267,16 +180,7 @@ type MockTokenStore struct {
 	resetTokens   map[string]*PasswordResetToken
 }
 
-// NewMockTokenStore membuat mock token store untuk testing.
-// Mock store menyimpan tokens dalam memory dan cocok untuk unit tests.
-//
-// Returns:
-//   - *MockTokenStore: mock store instance dengan empty token maps
-//
-// Example:
-//
-//	mockStore := NewMockTokenStore()
-//	// use in tests
+// NewMockTokenStore creates a new mock token store.
 func NewMockTokenStore() *MockTokenStore {
 	return &MockTokenStore{
 		refreshTokens: make(map[string]*RefreshToken),
@@ -284,18 +188,7 @@ func NewMockTokenStore() *MockTokenStore {
 	}
 }
 
-// SaveRefreshToken menyimpan refresh token dalam mock store (memory).
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - token: RefreshToken struct yang akan disimpan
-//
-// Returns:
-//   - error: selalu nil untuk mock
-//
-// Example:
-//
-//	err := mockStore.SaveRefreshToken(ctx, &token)
+// SaveRefreshToken saves a refresh token in mock store.
 func (s *MockTokenStore) SaveRefreshToken(ctx context.Context, token *RefreshToken) error {
 	token.ID = int64(len(s.refreshTokens) + 1)
 	token.CreatedAt = time.Now()
@@ -303,19 +196,7 @@ func (s *MockTokenStore) SaveRefreshToken(ctx context.Context, token *RefreshTok
 	return nil
 }
 
-// FindRefreshToken mencari refresh token dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - tokenHash: hash dari token yang akan dicari
-//
-// Returns:
-//   - *RefreshToken: token jika ditemukan, nil jika tidak
-//   - error: error message jika token tidak ditemukan
-//
-// Example:
-//
-//	token, err := mockStore.FindRefreshToken(ctx, tokenHash)
+// FindRefreshToken finds a refresh token in mock store.
 func (s *MockTokenStore) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
 	token, exists := s.refreshTokens[tokenHash]
 	if !exists {
@@ -324,18 +205,7 @@ func (s *MockTokenStore) FindRefreshToken(ctx context.Context, tokenHash string)
 	return token, nil
 }
 
-// RevokeRefreshToken membatalkan refresh token dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - tokenHash: hash dari token yang akan di-revoke
-//
-// Returns:
-//   - error: selalu nil untuk mock
-//
-// Example:
-//
-//	err := mockStore.RevokeRefreshToken(ctx, tokenHash)
+// RevokeRefreshToken revokes a refresh token in mock store.
 func (s *MockTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
 	if token, exists := s.refreshTokens[tokenHash]; exists {
 		now := time.Now()
@@ -344,18 +214,7 @@ func (s *MockTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash strin
 	return nil
 }
 
-// RevokeAllUserTokens membatalkan semua tokens user dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - userID: ID dari user yang semua token-nya akan di-revoke
-//
-// Returns:
-//   - error: selalu nil untuk mock
-//
-// Example:
-//
-//	err := mockStore.RevokeAllUserTokens(ctx, userID)
+// RevokeAllUserTokens revokes all user tokens in mock store.
 func (s *MockTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	now := time.Now()
 	for _, token := range s.refreshTokens {
@@ -366,18 +225,7 @@ func (s *MockTokenStore) RevokeAllUserTokens(ctx context.Context, userID string)
 	return nil
 }
 
-// SavePasswordResetToken menyimpan password reset token dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - token: PasswordResetToken struct yang akan disimpan
-//
-// Returns:
-//   - error: selalu nil untuk mock
-//
-// Example:
-//
-//	err := mockStore.SavePasswordResetToken(ctx, &token)
+// SavePasswordResetToken saves a password reset token in mock store.
 func (s *MockTokenStore) SavePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
 	token.ID = int64(len(s.resetTokens) + 1)
 	token.CreatedAt = time.Now()
@@ -385,19 +233,7 @@ func (s *MockTokenStore) SavePasswordResetToken(ctx context.Context, token *Pass
 	return nil
 }
 
-// FindPasswordResetToken mencari password reset token dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - tokenHash: hash dari reset token yang akan dicari
-//
-// Returns:
-//   - *PasswordResetToken: token jika ditemukan, nil jika tidak
-//   - error: error message jika token tidak ditemukan
-//
-// Example:
-//
-//	token, err := mockStore.FindPasswordResetToken(ctx, tokenHash)
+// FindPasswordResetToken finds a password reset token in mock store.
 func (s *MockTokenStore) FindPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
 	token, exists := s.resetTokens[tokenHash]
 	if !exists {
@@ -406,18 +242,7 @@ func (s *MockTokenStore) FindPasswordResetToken(ctx context.Context, tokenHash s
 	return token, nil
 }
 
-// MarkPasswordResetUsed menandai password reset token sebagai used dalam mock store.
-//
-// Parameters:
-//   - ctx: context (tidak digunakan dalam mock)
-//   - tokenHash: hash dari reset token yang akan ditandai as used
-//
-// Returns:
-//   - error: selalu nil untuk mock
-//
-// Example:
-//
-//	err := mockStore.MarkPasswordResetUsed(ctx, tokenHash)
+// MarkPasswordResetUsed marks a password reset token as used in mock store.
 func (s *MockTokenStore) MarkPasswordResetUsed(ctx context.Context, tokenHash string) error {
 	if token, exists := s.resetTokens[tokenHash]; exists {
 		now := time.Now()

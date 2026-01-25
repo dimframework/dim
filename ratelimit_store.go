@@ -9,7 +9,7 @@ import (
 )
 
 // RateLimitStore mendefinisikan interface untuk backend penyimpanan rate limit.
-// Memungkinkan pergantian antara InMemory (single instance) dan Postgres (multi-instance).
+// Memungkinkan pergantian antara InMemory (single instance) dan Database (multi-instance).
 type RateLimitStore interface {
 	// Allow mengecek apakah request diizinkan dan menaikkan counter.
 	// Mengembalikan true jika diizinkan, false jika tidak.
@@ -66,40 +66,57 @@ func (s *InMemoryRateLimitStore) Close() error {
 	return nil
 }
 
-// --- PostgreSQL Implementation ---
+// --- Database Implementation (PostgreSQL & SQLite) ---
 
-// PostgresRateLimitStore mengimplementasikan RateLimitStore menggunakan PostgreSQL.
+// DatabaseRateLimitStore mengimplementasikan RateLimitStore menggunakan database SQL.
 // Cocok untuk deployment multi-instance/cluster.
-// Menggunakan tabel UNLOGGED untuk performa tinggi (data hilang saat crash dapat diterima untuk rate limits).
-type PostgresRateLimitStore struct {
+// Menggunakan tabel UNLOGGED untuk performa tinggi di PostgreSQL.
+type DatabaseRateLimitStore struct {
 	db Database
 }
 
-// NewPostgresRateLimitStore membuat store rate limit PostgreSQL baru.
+// NewDatabaseRateLimitStore membuat store rate limit database baru.
 //
 // Parameters:
 //   - db: koneksi database yang mengimplementasikan interface Database
-func NewPostgresRateLimitStore(db Database) *PostgresRateLimitStore {
-	return &PostgresRateLimitStore{db: db}
+func NewDatabaseRateLimitStore(db Database) *DatabaseRateLimitStore {
+	return &DatabaseRateLimitStore{db: db}
+}
+
+// Deprecated: Use NewDatabaseRateLimitStore instead
+func NewPostgresRateLimitStore(db Database) *DatabaseRateLimitStore {
+	return NewDatabaseRateLimitStore(db)
 }
 
 // InitSchema membuat tabel yang diperlukan untuk rate limiting.
 // Sebaiknya dipanggil saat startup aplikasi atau migrasi.
-func (s *PostgresRateLimitStore) InitSchema(ctx context.Context) error {
-	query := `
-		CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
-			key VARCHAR(255) PRIMARY KEY,
-			count INT NOT NULL DEFAULT 0,
-			expires_at TIMESTAMP NOT NULL
-		);
-		CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
-	`
+func (s *DatabaseRateLimitStore) InitSchema(ctx context.Context) error {
+	var query string
+	if s.db.DriverName() == "sqlite" {
+		query = `
+			CREATE TABLE IF NOT EXISTS rate_limits (
+				key TEXT PRIMARY KEY,
+				count INT NOT NULL DEFAULT 0,
+				expires_at TIMESTAMP NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
+		`
+	} else {
+		query = `
+			CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
+				key VARCHAR(255) PRIMARY KEY,
+				count INT NOT NULL DEFAULT 0,
+				expires_at TIMESTAMP NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
+		`
+	}
 	return s.db.Exec(ctx, query)
 }
 
-// Allow mengecek dan menaikkan limit menggunakan Atomic UPSERT di PostgreSQL.
-func (s *PostgresRateLimitStore) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
-	now := time.Now()
+// Allow mengecek dan menaikkan limit menggunakan Atomic UPSERT.
+func (s *DatabaseRateLimitStore) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
+	now := time.Now().UTC().Truncate(time.Second)
 	expiresAt := now.Add(window)
 
 	// Atomic UPSERT (Insert or Update) dengan logika sliding window.
@@ -115,15 +132,17 @@ func (s *PostgresRateLimitStore) Allow(ctx context.Context, key string, limit in
 			ELSE rate_limits.count + 1
 		END,
 		expires_at = CASE
-			WHEN rate_limits.expires_at < $3 THEN $2
+			WHEN rate_limits.expires_at < $3 THEN $4
 			ELSE rate_limits.expires_at
 		END
 		RETURNING count
 	`
 
 	var count int
-	// $1=key, $2=expiresAt, $3=now
-	err := s.db.QueryRow(ctx, query, key, expiresAt, now).Scan(&count)
+	// Placeholders: $1=key, $2=expiresAt, $3=now, $4=expiresAt, $5=now
+	// Note: We repeat args because database/sql (SQLite) doesn't always support named positional reuse like pgx.
+	query = s.db.Rebind(query)
+	err := s.db.QueryRow(ctx, query, key, expiresAt, now, expiresAt, now).Scan(&count)
 	if err != nil {
 		return false, err
 	}
@@ -132,6 +151,6 @@ func (s *PostgresRateLimitStore) Allow(ctx context.Context, key string, limit in
 }
 
 // Close menutup koneksi (no-op untuk implementasi ini karena DB dikelola di luar).
-func (s *PostgresRateLimitStore) Close() error {
+func (s *DatabaseRateLimitStore) Close() error {
 	return nil
 }
