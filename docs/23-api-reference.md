@@ -181,15 +181,17 @@ Membuat validator baru.
 
 ### Database
 - `NewPostgresDatabase(config DatabaseConfig) (*PostgresDatabase, error)`
-- `(db *PostgresDatabase) Query(ctx, query, args...) (Rows, error)`
-- `(db *PostgresDatabase) Exec(ctx, query, args...) error`
-- `(db *PostgresDatabase) Begin(ctx) (pgx.Tx, error)`
-- `(db *PostgresDatabase) WithTx(ctx, fn) error`
-- `(db *PostgresDatabase) Close()`
+- `NewSQLiteDatabase(config DatabaseConfig) (*SQLiteDatabase, error)`
+- `(db) Query(ctx, query, args...) (Rows, error)`
+- `(db) Exec(ctx, query, args...) error`
+- `(db) Begin(ctx) (Tx, error)`
+- `(db) WithTx(ctx, fn) error`
+- `(db) DriverName() string`
+- `(db) Close()`
 
 ### Rate Limit Storage
 - `NewInMemoryRateLimitStore(window time.Duration)`
-- `NewPostgresRateLimitStore(db Database)`
+- `NewDatabaseRateLimitStore(db Database)`
 
 ### Migrations
 - `GetFrameworkMigrations() []Migration`: Mendapatkan semua migrasi inti.

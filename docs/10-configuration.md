@@ -219,23 +219,33 @@ if err != nil {
 ### Environment Variables
 
 ```bash
-# JWT signing secret (CHANGE IN PRODUCTION!)
+# JWT signing method: HS256 (default), RS256, ES256
+JWT_SIGNING_METHOD=HS256
+
+# JWT signing secret (required for HS256)
 JWT_SECRET=your-super-secret-key-change-in-production
+
+# Private key file path or content (required for RS256/ES256)
+JWT_PRIVATE_KEY=/path/to/private.pem
 
 # Access token expiry (default: 15m)
 JWT_ACCESS_TOKEN_EXPIRY=15m
 
-# Refresh token expiry (default: 7d)
-JWT_REFRESH_TOKEN_EXPIRY=7d
+# Refresh token expiry (default: 168h/7d)
+JWT_REFRESH_TOKEN_EXPIRY=168h
 ```
 
 ### JWT Config Struct
 
 ```go
 type JWTConfig struct {
-    Secret              string
-    AccessTokenExpiry   time.Duration
-    RefreshTokenExpiry  time.Duration
+    AccessTokenExpiry  time.Duration
+    RefreshTokenExpiry time.Duration
+    SigningMethod      string
+    HMACSecret         string
+    PrivateKey         string
+    PublicKeys         map[string]string
+    JWKSURL            string
 }
 ```
 
@@ -444,15 +454,50 @@ RATE_LIMIT_RESET_PERIOD=1h
 ### Environment Variables
 
 ```bash
+# Mail transport: null (default), smtp
+MAIL_TRANSPORT=null
+
 # From email address
-EMAIL_FROM=noreply@example.com
+MAIL_FROM=noreply@example.com
+
+# SMTP settings (required if transport is smtp)
+MAIL_SMTP_HOST=smtp.mailtrap.io
+MAIL_SMTP_PORT=587
+MAIL_SMTP_USERNAME=username
+MAIL_SMTP_PASSWORD=password
+
+# Branding settings
+MAIL_APP_NAME=MyAwesomeApp
+MAIL_LOGO_URL=https://example.com/logo.png
+MAIL_PRIMARY_COLOR=#007bff
+MAIL_SUPPORT_EMAIL=support@example.com
+MAIL_COMPANY_NAME="My Company, Inc."
+
+# Social Links (JSON format)
+MAIL_SOCIAL_LINKS='[{"name":"Twitter","url":"..."}]'
+
+# Base URL for action links (e.g. password reset)
+APP_BASE_URL=http://localhost:8080
 ```
 
 ### Email Config Struct
 
 ```go
 type EmailConfig struct {
-    FromEmail  string
+    From         string
+    Transport    string
+    SMTPHost     string
+    SMTPPort     int
+    SMTPUsername string
+    SMTPPassword string
+    AppName      string
+    LogoURL      string
+    PrimaryColor string
+    SupportEmail string
+    SupportURL   string
+    CompanyName  string
+    SocialLinks  string
+    BaseURL      string
 }
 ```
 
@@ -635,8 +680,8 @@ if err != nil {
 }
 
 // Validate critical values
-if cfg.JWT.Secret == "" {
-    log.Fatal("JWT_SECRET is required")
+if cfg.JWT.HMACSecret == "" && cfg.JWT.SigningMethod == "HS256" {
+    log.Fatal("JWT_SECRET is required for HS256")
 }
 
 if cfg.Database.WriteHost == "" {

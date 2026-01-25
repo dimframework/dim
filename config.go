@@ -49,6 +49,7 @@ type JWTConfig struct {
 
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
+	Driver        string // "postgres" or "sqlite"
 	WriteHost     string
 	ReadHosts     []string
 	Port          int
@@ -61,9 +62,37 @@ type DatabaseConfig struct {
 	QueryExecMode string            // Query execution mode: "simple" or "" (default)
 }
 
-// EmailConfig holds email configuration
+// EmailConfig holds email configuration and branding settings.
 type EmailConfig struct {
+	// From is the default sender email address.
 	From string
+
+	// Transport is the mail delivery method: "smtp", "ses", or "null" (default: "null").
+	Transport string
+
+	// SMTP Configuration (required if Transport is "smtp")
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+
+	// SES Configuration (required if Transport is "ses")
+	SESRegion           string
+	SESAccessKeyID      string
+	SESSecretAccessKey  string
+	SESConfigurationSet string
+
+	// Branding settings for email templates
+	AppName      string // Application name shown in emails (default: "App")
+	LogoURL      string // URL to application logo (optional)
+	PrimaryColor string // Primary brand color in hex (default: "#007bff")
+	SupportEmail string // Support contact email (optional)
+	SupportURL   string // Support website URL (optional)
+	CompanyName  string // Company name for footer (optional)
+	SocialLinks  string // JSON array of SocialLink objects (optional)
+
+	// BaseURL is the application root URL, required for generating action links (e.g. password reset).
+	BaseURL string
 }
 
 // RateLimitConfig holds rate limiting configuration
@@ -136,11 +165,16 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	emailCfg, err := loadEmailConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Server:    serverCfg,
 		JWT:       jwtCfg,
 		Database:  dbCfg,
-		Email:     loadEmailConfig(),
+		Email:     emailCfg,
 		RateLimit: rateLimitCfg,
 		CORS:      corsCfg,
 		CSRF:      csrfCfg,
@@ -248,6 +282,8 @@ func resolveKeyContent(val string) string {
 
 // loadDatabaseConfig loads database configuration
 func loadDatabaseConfig() (DatabaseConfig, error) {
+	driver := GetEnvOrDefault("DB_DRIVER", "postgres")
+
 	readHostsStr := GetEnv("DB_READ_HOSTS")
 	readHosts := []string{}
 	if readHostsStr != "" {
@@ -268,6 +304,7 @@ func loadDatabaseConfig() (DatabaseConfig, error) {
 	}
 
 	return DatabaseConfig{
+		Driver:        driver,
 		WriteHost:     GetEnv("DB_WRITE_HOST"),
 		ReadHosts:     readHosts,
 		Port:          port,
@@ -282,10 +319,48 @@ func loadDatabaseConfig() (DatabaseConfig, error) {
 }
 
 // loadEmailConfig loads email configuration
-func loadEmailConfig() EmailConfig {
-	return EmailConfig{
-		From: GetEnv("EMAIL_FROM"),
+func loadEmailConfig() (EmailConfig, error) {
+	smtpPort, err := ParseEnvInt(GetEnvOrDefault("MAIL_SMTP_PORT", "587"))
+	if err != nil {
+		return EmailConfig{}, fmt.Errorf("invalid MAIL_SMTP_PORT: %w", err)
 	}
+
+	// SES Config Loading with Fallbacks
+	sesRegion := GetEnv("AWS_REGION")
+	if sesRegion == "" {
+		sesRegion = GetEnv("SES_REGION")
+	}
+
+	sesAccessKey := GetEnv("AWS_ACCESS_KEY_ID")
+	if sesAccessKey == "" {
+		sesAccessKey = GetEnv("SES_ACCESS_KEY_ID")
+	}
+
+	sesSecretKey := GetEnv("AWS_SECRET_ACCESS_KEY")
+	if sesSecretKey == "" {
+		sesSecretKey = GetEnv("SES_SECRET_ACCESS_KEY")
+	}
+
+	return EmailConfig{
+		From:                GetEnv("MAIL_FROM"),
+		Transport:           GetEnvOrDefault("MAIL_TRANSPORT", "null"),
+		SMTPHost:            GetEnv("MAIL_SMTP_HOST"),
+		SMTPPort:            smtpPort,
+		SMTPUsername:        GetEnv("MAIL_SMTP_USERNAME"),
+		SMTPPassword:        GetEnv("MAIL_SMTP_PASSWORD"),
+		SESRegion:           sesRegion,
+		SESAccessKeyID:      sesAccessKey,
+		SESSecretAccessKey:  sesSecretKey,
+		SESConfigurationSet: GetEnv("SES_CONFIGURATION_SET"),
+		AppName:             GetEnvOrDefault("MAIL_APP_NAME", "App"),
+		LogoURL:             GetEnv("MAIL_LOGO_URL"),
+		PrimaryColor:        GetEnvOrDefault("MAIL_PRIMARY_COLOR", "#007bff"),
+		SupportEmail:        GetEnv("MAIL_SUPPORT_EMAIL"),
+		SupportURL:          GetEnv("MAIL_SUPPORT_URL"),
+		CompanyName:         GetEnv("MAIL_COMPANY_NAME"),
+		SocialLinks:         GetEnv("MAIL_SOCIAL_LINKS"),
+		BaseURL:             GetEnv("APP_BASE_URL"),
+	}, nil
 }
 
 // loadRateLimitConfig loads rate limiting configuration
@@ -386,16 +461,35 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Database.WriteHost == "" {
-		return fmt.Errorf("DB_WRITE_HOST is required")
-	}
-
 	if c.Database.Database == "" {
 		return fmt.Errorf("DB_NAME is required")
 	}
 
-	if c.Database.Username == "" {
-		return fmt.Errorf("DB_USER is required")
+	// Validation specific to Postgres
+	if c.Database.Driver == "postgres" {
+		if c.Database.WriteHost == "" {
+			return fmt.Errorf("DB_WRITE_HOST is required for postgres")
+		}
+		if c.Database.Username == "" {
+			return fmt.Errorf("DB_USER is required for postgres")
+		}
+	}
+
+	// Email Validation
+	if c.Email.Transport != "null" && c.Email.Transport != "" {
+		if c.Email.From == "" {
+			return fmt.Errorf("MAIL_FROM is required when mail transport is enabled")
+		}
+		if c.Email.Transport == "smtp" {
+			if c.Email.SMTPHost == "" {
+				return fmt.Errorf("MAIL_SMTP_HOST is required for SMTP transport")
+			}
+		}
+		if c.Email.Transport == "ses" {
+			if c.Email.SESRegion == "" {
+				return fmt.Errorf("AWS_REGION (or SES_REGION) is required for SES transport")
+			}
+		}
 	}
 
 	return nil

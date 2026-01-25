@@ -161,6 +161,18 @@ router.Group("/api", apiHandler)
 router.SPA(os.DirFS("./dist"), "index.html")
 ```
 
+> **PERINGATAN (SPA vs Testing):**
+> Karena `router.SPA` mendaftarkan route *wildcard* `GET /{path...}`, ia akan menangkap **semua** request GET yang tidak cocok dengan route spesifik lainnya. Ini bisa mengganggu *Integration Testing* jika handler SPA dimuat saat testing API.
+>
+> **Rekomendasi:** Pisahkan fungsi registrasi route API dan SPA. Saat testing API, panggil hanya fungsi registrasi API.
+>
+> ```go
+> func (h *Handler) RegisterRoutes() {
+>     h.RegisterAPIRoutes()
+>     h.RegisterSPARoutes() // Jangan panggil ini di test setup
+> }
+> ```
+
 **Fitur Otomatis SPA**:
 - **Fallback**: Mengembalikan `index.html` jika file statis tidak ditemukan.
 - **Security**: Menambahkan header keamanan pada `index.html`.

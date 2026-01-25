@@ -16,12 +16,15 @@ Pelajari cara menggunakan database abstraction layer dengan PostgreSQL, read/wri
 
 ## Konsep Database Layer
 
-Framework dim menggunakan wrapper di atas driver `pgx/v5` yang menyediakan fitur:
+Framework dim menyediakan interface database-agnostic yang mendukung:
 
-1.  **Read/Write Splitting**: Memisahkan query ke *primary* dan *replica*.
-2.  **Observability**: Tracer otomatis untuk logging query.
-3.  **Security**: Masking otomatis data sensitif di log.
-4.  **Connection Pooling**: Manajemen koneksi yang efisien.
+1.  **PostgreSQL**: Menggunakan driver `pgx/v5` dengan fitur Read/Write Splitting dan Connection Pooling.
+2.  **SQLite**: Menggunakan driver `go-sqlite3`, ideal untuk development atau deployment skala kecil.
+
+Fitur umum meliputi:
+- **Observability**: Tracer otomatis untuk logging query.
+- **Security**: Masking otomatis data sensitif di log.
+- **Unified Interface**: API yang konsisten (`Exec`, `Query`, `QueryRow`, `Begin`) terlepas dari driver yang digunakan.
 
 ---
 
@@ -32,7 +35,9 @@ Framework dim menggunakan wrapper di atas driver `pgx/v5` yang menyediakan fitur
 Gunakan struct `DatabaseConfig` untuk mengatur koneksi:
 
 ```go
-config := dim.DatabaseConfig{
+// Contoh untuk PostgreSQL
+pgConfig := dim.DatabaseConfig{
+    Driver:        "postgres",
     WriteHost:     "db-primary",
     ReadHosts:     []string{"db-replica-1", "db-replica-2"},
     Port:          5432,
@@ -47,22 +52,30 @@ config := dim.DatabaseConfig{
         "search_path": "public,app",
     },
 }
+
+// Contoh untuk SQLite
+sqliteConfig := dim.DatabaseConfig{
+    Driver:   "sqlite",
+    Database: "./myapp.db", // Path ke file database
+}
 ```
 
 ### Inisialisasi
 
 ```go
-db, err := dim.NewPostgresDatabase(config)
+var db dim.Database
+var err error
+
+if config.Driver == "sqlite" {
+    db, err = dim.NewSQLiteDatabase(config)
+} else {
+    db, err = dim.NewPostgresDatabase(config)
+}
+
 if err != nil {
     log.Fatal(err)
 }
 defer db.Close()
-
-// Opsional: Jalankan migrasi inti framework
-// Ini akan membuat tabel users, tokens, dan rate_limits jika belum ada.
-if err := dim.RunMigrations(db, dim.GetFrameworkMigrations()); err != nil {
-    log.Fatal("Gagal migrasi:", err)
-}
 ```
 
 ---
@@ -103,9 +116,9 @@ Anda tidak perlu konfigurasi tambahan, fitur ini aktif secara default untuk menc
 
 ## Read/Write Splitting
 
-### Routing Otomatis
+### Routing Otomatis (PostgreSQL)
 
-Framework memiliki logika routing cerdas:
+Framework memiliki logika routing cerdas untuk PostgreSQL:
 
 1.  **Exec (INSERT/UPDATE/DELETE)**: Selalu ke **Write Pool** (Primary).
 2.  **Query/QueryRow (SELECT)**:
@@ -124,15 +137,17 @@ db.Exec(ctx, "UPDATE users SET name=$1", "John")
 
 ## Operasi Query
 
-API `dim.Database` kompatibel dengan standar `database/sql` namun menggunakan `pgx` di belakang layar.
+API `dim.Database` kompatibel dengan standar `database/sql` namun menggunakan interface wrapper.
 
 ### Query Row
 
 ```go
 var name string
-err := db.QueryRow(ctx, "SELECT name FROM users WHERE id=$1", 1).Scan(&name)
+// Gunakan parameter $1 (Postgres) atau ? (SQLite) sesuai driver
+query := "SELECT name FROM users WHERE id=$1" 
+err := db.QueryRow(ctx, query, 1).Scan(&name)
 if err != nil {
-    // Handle error (termasuk pgx.ErrNoRows)
+    // Handle error
 }
 ```
 
@@ -152,6 +167,23 @@ for rows.Next() {
     }
     // ...
 }
+```
+
+### Menulis Query Agnostik (`Rebind`)
+
+Agar kode Anda berjalan baik di PostgreSQL (menggunakan placeholder `$1`, `$2`) dan SQLite (menggunakan `?`), gunakan metode `db.Rebind(query)`.
+
+Tulis query Anda menggunakan sintaks PostgreSQL (placeholder `$n`), lalu panggil `Rebind` sebelum mengeksekusi. Framework akan otomatis mengubahnya menjadi `?` jika driver yang aktif adalah SQLite.
+
+```go
+// Tulis query dengan style Postgres ($1, $2)
+query := `INSERT INTO users (name, email) VALUES ($1, $2)`
+
+// Rebind akan mengubah $1 -> ? jika driver adalah SQLite
+// Jika driver Postgres, query tidak berubah.
+query = db.Rebind(query)
+
+err := db.Exec(ctx, query, "John", "john@example.com")
 ```
 
 ---
@@ -182,7 +214,8 @@ if err := tx.Commit(ctx); err != nil {
 Helper `WithTx` menangani commit/rollback secara otomatis. Sangat disarankan untuk menghindari *dangling transaction*.
 
 ```go
-err := db.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+// Callback menerima interface dim.Tx
+err := db.WithTx(ctx, func(ctx context.Context, tx dim.Tx) error {
     // Query 1
     if _, err := tx.Exec(ctx, "INSERT INTO balance ..."); err != nil {
         return err // Otomatis Rollback

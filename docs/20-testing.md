@@ -144,8 +144,10 @@ type MockDatabase struct {
     ExecFunc func(ctx context.Context, query string, args ...interface{}) error
     QueryFunc func(ctx context.Context, query string, args ...interface{}) (dim.Rows, error)
     QueryRowFunc func(ctx context.Context, query string, args ...interface{}) dim.Row
-    BeginFunc func(ctx context.Context) (pgx.Tx, error)
+    BeginFunc func(ctx context.Context) (dim.Tx, error)
+    WithTxFunc func(ctx context.Context, fn dim.TransactionFunc) error
     CloseFunc func() error
+    DriverNameFunc func() string
 }
 
 // Implementasikan setiap metode interface
@@ -157,6 +159,13 @@ func (m *MockDatabase) Exec(ctx context.Context, query string, args ...interface
 }
 
 // ... implementasikan metode lain (Query, QueryRow, Begin, Close) ...
+
+func (m *MockDatabase) DriverName() string {
+    if m.DriverNameFunc != nil {
+        return m.DriverNameFunc()
+    }
+    return "mock"
+}
 ```
 
 **3. Gunakan Mock dalam Pengujian:**
@@ -355,7 +364,7 @@ func TestAuthFlow(t *testing.T) {
     
     // Setup stores and services
     userStore := dim.NewPostgresUserStore(db)
-    tokenStore := dim.NewPostgresTokenStore(db)
+    tokenStore := dim.NewDatabaseTokenStore(db)
     cfg := &JWTConfig{
         Secret: "test-secret",
         AccessTokenExpiry: 15 * time.Minute,

@@ -175,11 +175,11 @@ db, _ := dim.NewPostgresDatabase(dbConfig)
 // Ini akan membuat tabel 'rate_limits' yang diperlukan
 dim.RunMigrations(db, dim.GetRateLimitMigrations())
 
-// 3. Buat store rate limit
-rateStore := dim.NewPostgresRateLimitStore(db)
+	// Opsi 2: Database Storage (PostgreSQL/SQLite)
+	// rateStore := dim.NewDatabaseRateLimitStore(db)
 
-// 4. Gunakan di middleware
-router.Use(dim.RateLimit(config, rateStore))
+	r.Use(dim.RateLimit(config, rateStore))
+}
 ```
 
 ---

@@ -927,7 +927,7 @@ row := db.QueryRow(query, email)
 
 2. Use ORM atau query builder jika prefer:
 ```go
-// Dengan pgx (parameterized)
+// Dengan parameterized query via dim.Database
 var user User
 err := db.QueryRow(ctx, 
     "SELECT id, email FROM users WHERE email = $1", 

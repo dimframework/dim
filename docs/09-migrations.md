@@ -1,6 +1,6 @@
-# Database Migrations di Framework dim
+# Database Migrations
 
-Pelajari cara melakukan database versioning dan schema management dengan migrations di framework dim.
+Kelola perubahan skema database secara terstruktur, versioned, dan aman menggunakan fitur migrasi bawaan dim. Framework ini mendukung **Database Agnostic Migrations**, memungkinkan satu set migrasi berjalan di PostgreSQL maupun SQLite.
 
 ## Daftar Isi
 
@@ -9,8 +9,7 @@ Pelajari cara melakukan database versioning dan schema management dengan migrati
 - [Membuat Migration (CLI)](#membuat-migration-cli)
 - [Struktur Migration](#struktur-migration)
 - [Menjalankan Migration](#menjalankan-migration)
-- [Rollback](#rollback)
-- [Contoh Kode](#contoh-kode)
+- [Override Default Tables](#override-default-tables)
 
 ---
 
@@ -50,13 +49,6 @@ go run . make:migration create_products_table
 # Migration created: migrations/20260116120000_create_products_table.go
 ```
 
-### Opsi Tambahan
-
-```bash
-# Simpan di direktori spesifik
-go run . make:migration add_category_id --dir internal/database/migrations
-```
-
 ---
 
 ## Struktur Migration
@@ -68,12 +60,9 @@ package migrations
 
 import (
     "context"
-    "github.com/jackc/pgx/v5/pgxpool"
     "github.com/dimframework/dim"
 )
 
-// init() otomatis dijalankan saat aplikasi start
-// dan mendaftarkan migrasi ini ke global registry framework.
 func init() {
     dim.Register(dim.Migration{
         Version: 20260116120000,
@@ -83,48 +72,34 @@ func init() {
     })
 }
 
-// Up: Dijalankan saat migrate
-func UpCreateProductsTable(pool *pgxpool.Pool) error {
-    _, err := pool.Exec(context.Background(), `
-        CREATE TABLE IF NOT EXISTS products (
-            id BIGSERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            price DECIMAL(10, 2) NOT NULL,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )
-    `)
-    return err
-}
-
-// Down: Dijalankan saat rollback
-func DownCreateProductsTable(pool *pgxpool.Pool) error {
-    _, err := pool.Exec(context.Background(), `
-        DROP TABLE IF EXISTS products
-    `)
-    return err
-}
-```
-
----
-
-## Setup Aplikasi
-
-Agar migrasi "terbaca" oleh command `migrate`, Anda harus melakukan **Blank Import** folder migrasi Anda di `main.go`. Ini memicu fungsi `init()` di setiap file migrasi untuk berjalan.
-
-```go
-// cmd/app/main.go
-package main
-
-import (
-    "github.com/dimframework/dim"
+func UpCreateProductsTable(db dim.Database) error {
+    var query string
     
-    // PENTING: Import folder migrations agar ter-register
-    _ "github.com/username/project/migrations"
-)
+    // Sesuaikan syntax SQL berdasarkan driver
+    if db.DriverName() == "sqlite" {
+        query = `
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `
+    } else {
+        // Default: PostgreSQL
+        query = `
+            CREATE TABLE IF NOT EXISTS products (
+                id BIGSERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `
+    }
+    
+    return db.Exec(context.Background(), query)
+}
 
-func main() {
-    // ... setup kode ...
+func DownCreateProductsTable(db dim.Database) error {
+    return db.Exec(context.Background(), `DROP TABLE IF EXISTS products`)
 }
 ```
 
@@ -132,54 +107,78 @@ func main() {
 
 ## Menjalankan Migration
 
-Framework `dim` menyediakan console command bawaan untuk manajemen migrasi.
-
-### Migrate (Up)
-
-Menjalankan semua migrasi yang belum dieksekusi (framework core + aplikasi).
-
 ```bash
+# Migrate (Up)
 go run . migrate
-```
 
-### Check Status
-
-Melihat daftar migrasi yang sudah dan belum dijalankan.
-
-```bash
+# Check Status
 go run . migrate:list
-```
 
-### Rollback (Down)
-
-Membatalkan batch migrasi terakhir.
-
-```bash
-# Rollback 1 batch terakhir
+# Rollback (Down)
 go run . migrate:rollback
-
-# Rollback spesifik 2 langkah
-go run . migrate:rollback --step 2
 ```
 
 ---
 
-## Contoh Kode manual (Advanced)
+## Override Default Tables
 
-Jika Anda ingin menjalankan migrasi secara programatik (bukan lewat CLI), Anda bisa mengakses registry:
+Secara default, `dim` menyertakan migrasi untuk tabel inti seperti `users`, `refresh_tokens`, `password_reset_tokens`, dll.
+Jika Anda ingin **mengganti** skema tabel-tabel ini (misalnya menggunakan `BIGSERIAL` untuk ID user alih-alih `UUID`, atau menambahkan kolom baru), Anda dapat menonaktifkan migrasi bawaan framework.
 
-```go
-func main() {
-    // 1. Setup DB
-    db, _ := dim.NewPostgresDatabase(cfg.Database)
-    
-    // 2. Gabungkan Migrasi Core + Registered Migrations
-    allMigrations := dim.GetFrameworkMigrations()
-    allMigrations = append(allMigrations, dim.GetRegisteredMigrations()...)
-    
-    // 3. Jalankan
-    if err := dim.RunMigrations(db, allMigrations); err != nil {
-        log.Fatal(err)
+### Langkah-langkah Override
+
+1.  **Disable Framework Migrations** di `init()` utama aplikasi Anda (misal di `cmd/app/main.go` atau file setup lainnya).
+
+    ```go
+    // cmd/app/main.go
+    func init() {
+        // Matikan migrasi bawaan framework
+        dim.DisableFrameworkMigrations()
     }
-}
-```
+    ```
+
+2.  **Buat Migrasi Pengganti** menggunakan CLI.
+
+    ```bash
+    go run . make:migration create_core_tables
+    ```
+
+3.  **Definisikan Skema Baru** di file migrasi yang baru dibuat.
+    Pastikan Anda tetap membuat tabel-tabel yang dibutuhkan oleh service `dim` (seperti `AuthService`) jika Anda menggunakannya, atau sesuaikan service tersebut.
+
+    Contoh definisi ulang tabel users dengan ID serial:
+
+    ```go
+    // migrations/2026xxxx_create_core_tables.go
+    func UpCreateCoreTables(db dim.Database) error {
+        var query string
+        if db.DriverName() == "sqlite" {
+             query = `
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    password TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+             `
+        } else {
+             query = `
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    name VARCHAR(100),
+                    password VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                );
+             `
+        }
+        
+        _, err := db.Exec(context.Background(), query)
+        return err
+    }
+    ```
+
+Dengan cara ini, saat Anda menjalankan `go run . migrate`, framework hanya akan menjalankan migrasi kustom Anda dan mengabaikan versi bawaan.

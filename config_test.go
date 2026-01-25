@@ -201,6 +201,7 @@ func TestValidate_MissingJWTSecret(t *testing.T) {
 	cfg := &Config{
 		JWT: JWTConfig{HMACSecret: "", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
+			Driver:    "postgres",
 			WriteHost: "localhost",
 			Database:  "testdb",
 			Username:  "user",
@@ -219,6 +220,7 @@ func TestValidate_MissingDBWriteHost(t *testing.T) {
 	cfg := &Config{
 		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
+			Driver:    "postgres",
 			WriteHost: "",
 			Database:  "testdb",
 			Username:  "user",
@@ -228,8 +230,8 @@ func TestValidate_MissingDBWriteHost(t *testing.T) {
 	if err == nil {
 		t.Error("Validate() should fail when DB_WRITE_HOST is missing")
 	}
-	if err.Error() != "DB_WRITE_HOST is required" {
-		t.Errorf("Expected 'DB_WRITE_HOST is required', got %v", err)
+	if err.Error() != "DB_WRITE_HOST is required for postgres" {
+		t.Errorf("Expected 'DB_WRITE_HOST is required for postgres', got %v", err)
 	}
 }
 
@@ -237,6 +239,7 @@ func TestValidate_MissingDBName(t *testing.T) {
 	cfg := &Config{
 		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
+			Driver:    "postgres",
 			WriteHost: "localhost",
 			Database:  "",
 			Username:  "user",
@@ -255,6 +258,7 @@ func TestValidate_MissingDBUser(t *testing.T) {
 	cfg := &Config{
 		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
+			Driver:    "postgres",
 			WriteHost: "localhost",
 			Database:  "testdb",
 			Username:  "",
@@ -264,8 +268,8 @@ func TestValidate_MissingDBUser(t *testing.T) {
 	if err == nil {
 		t.Error("Validate() should fail when DB_USER is missing")
 	}
-	if err.Error() != "DB_USER is required" {
-		t.Errorf("Expected 'DB_USER is required', got %v", err)
+	if err.Error() != "DB_USER is required for postgres" {
+		t.Errorf("Expected 'DB_USER is required for postgres', got %v", err)
 	}
 }
 
@@ -273,6 +277,7 @@ func TestValidate_Success(t *testing.T) {
 	cfg := &Config{
 		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
 		Database: DatabaseConfig{
+			Driver:    "postgres",
 			WriteHost: "localhost",
 			Database:  "testdb",
 			Username:  "user",
@@ -281,6 +286,20 @@ func TestValidate_Success(t *testing.T) {
 	err := cfg.Validate()
 	if err != nil {
 		t.Errorf("Validate() should succeed with all required fields, got error: %v", err)
+	}
+}
+
+func TestValidate_SQLite_Success(t *testing.T) {
+	cfg := &Config{
+		JWT: JWTConfig{HMACSecret: "secret", SigningMethod: "HS256"},
+		Database: DatabaseConfig{
+			Driver:   "sqlite",
+			Database: "test.db",
+		},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("Validate() SQLite should succeed, got error: %v", err)
 	}
 }
 
