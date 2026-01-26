@@ -268,7 +268,6 @@ const migrationTemplate = `package {{.Package}}
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/dimframework/dim"
 )
 
@@ -282,7 +281,7 @@ func init() {
 }
 
 // Up{{.FuncName}} executes the migration (add tables, columns, etc)
-func Up{{.FuncName}}(pool *pgxpool.Pool) error {
+func Up{{.FuncName}}(db dim.Database) error {
 	// TODO: Write your migration SQL here
 	query := ` + "`" + `
 		CREATE TABLE IF NOT EXISTS example (
@@ -290,15 +289,15 @@ func Up{{.FuncName}}(pool *pgxpool.Pool) error {
 			created_at TIMESTAMP DEFAULT NOW()
 		);
 	` + "`" + `
-	_, err := pool.Exec(context.Background(), query)
+	err := db.Exec(context.Background(), query)
 	return err
 }
 
 // Down{{.FuncName}} rolls back the migration (drop tables, columns, etc)
-func Down{{.FuncName}}(pool *pgxpool.Pool) error {
+func Down{{.FuncName}}(db dim.Database) error {
 	// TODO: Write your rollback SQL here
 	query := "DROP TABLE IF EXISTS example CASCADE"
-	_, err := pool.Exec(context.Background(), query)
+	err := db.Exec(context.Background(), query)
 	return err
 }
 `
