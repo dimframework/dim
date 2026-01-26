@@ -2,6 +2,9 @@ package dim
 
 import (
 	"flag"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -287,5 +290,109 @@ func TestMigrateRollbackCommand_BothFlags(t *testing.T) {
 
 	if !cmd.force {
 		t.Error("Expected force to be true when -force flag is set")
+	}
+}
+
+// ============================================================================
+// MakeMigrationCommand Tests
+// ============================================================================
+
+func TestMakeMigrationCommand_Name(t *testing.T) {
+	cmd := &MakeMigrationCommand{}
+	if cmd.Name() != "make:migration" {
+		t.Errorf("Expected name 'make:migration', got '%s'", cmd.Name())
+	}
+}
+
+func TestMakeMigrationCommand_Description(t *testing.T) {
+	cmd := &MakeMigrationCommand{}
+	desc := cmd.Description()
+	if desc == "" {
+		t.Error("Description should not be empty")
+	}
+}
+
+func TestMakeMigrationCommand_DefineFlags(t *testing.T) {
+	cmd := &MakeMigrationCommand{}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+
+	cmd.DefineFlags(fs)
+
+	// Check flags
+	dirFlag := fs.Lookup("dir")
+	if dirFlag == nil {
+		t.Fatal("dir flag not defined")
+	}
+	if dirFlag.DefValue != "migrations" {
+		t.Errorf("Expected default dir 'migrations', got '%s'", dirFlag.DefValue)
+	}
+
+	pkgFlag := fs.Lookup("pkg")
+	if pkgFlag == nil {
+		t.Fatal("pkg flag not defined")
+	}
+}
+
+func TestMakeMigrationCommand_Execute_GeneratesValidFile(t *testing.T) {
+	// Create temp directory for migrations
+	tmpDir, err := os.MkdirTemp("", "migrations_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := &MakeMigrationCommand{
+		dir: tmpDir,
+	}
+
+	ctx := &CommandContext{
+		Args: []string{"test_feature"},
+	}
+
+	// Execute command
+	if err := cmd.Execute(ctx); err != nil {
+		t.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Verify file was created
+	files, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to read dir: %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("Expected 1 file created, got %d", len(files))
+	}
+
+	fileName := files[0].Name()
+	if !strings.HasSuffix(fileName, "_test_feature.go") {
+		t.Errorf("Unexpected filename: %s", fileName)
+	}
+
+	// Verify content
+	contentBytes, err := os.ReadFile(filepath.Join(tmpDir, fileName))
+	if err != nil {
+		t.Fatalf("Failed to read created file: %v", err)
+	}
+	content := string(contentBytes)
+
+	// Check for critical parts of the template that were fixed
+	expectedStrings := []string{
+		"package migrations", // Default package name
+		"dim.Register(dim.Migration{",
+		"func UpTestFeature(db dim.Database) error {",   // Correct interface
+		"func DownTestFeature(db dim.Database) error {", // Correct interface
+		"err := db.Exec(context.Background(), query)",
+	}
+
+	for _, expected := range expectedStrings {
+		if !strings.Contains(content, expected) {
+			t.Errorf("Generated file missing expected string: '%s'", expected)
+		}
+	}
+
+	// Ensure old pgxpool import is NOT present
+	if strings.Contains(content, "github.com/jackc/pgx/v5/pgxpool") {
+		t.Error("Generated file contains deprecated pgxpool import")
 	}
 }
