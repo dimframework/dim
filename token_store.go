@@ -62,7 +62,7 @@ func (s *DatabaseTokenStore) SaveRefreshToken(ctx context.Context, token *Refres
 	query := `INSERT INTO refresh_tokens (user_id, token_hash, user_agent, ip_address, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, created_at`
-	
+
 	err := s.db.QueryRow(ctx, s.db.Rebind(query),
 		token.UserID,
 		token.TokenHash,
@@ -84,9 +84,9 @@ func (s *DatabaseTokenStore) FindRefreshToken(ctx context.Context, tokenHash str
 	token := &RefreshToken{}
 	query := `SELECT id, user_id, token_hash, user_agent, ip_address, expires_at, created_at, revoked_at
 		 FROM refresh_tokens WHERE token_hash = $1`
-	
+
 	err := s.db.QueryRow(ctx, s.db.Rebind(query), tokenHash).Scan(
-		&token.ID, &token.UserID, &token.TokenHash, &token.UserAgent, &token.IPAddress, 
+		&token.ID, &token.UserID, &token.TokenHash, &token.UserAgent, &token.IPAddress,
 		&token.ExpiresAt, &token.CreatedAt, &token.RevokedAt,
 	)
 
@@ -100,7 +100,7 @@ func (s *DatabaseTokenStore) FindRefreshToken(ctx context.Context, tokenHash str
 // RevokeRefreshToken revokes a refresh token by setting revoked_at timestamp.
 func (s *DatabaseTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
 	query := `UPDATE refresh_tokens SET revoked_at = $1 WHERE token_hash = $2`
-	
+
 	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), tokenHash)
 
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *DatabaseTokenStore) RevokeRefreshToken(ctx context.Context, tokenHash s
 // RevokeAllUserTokens revokes all refresh tokens for a specific user.
 func (s *DatabaseTokenStore) RevokeAllUserTokens(ctx context.Context, userID string) error {
 	query := `UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL`
-	
+
 	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), userID)
 
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *DatabaseTokenStore) SavePasswordResetToken(ctx context.Context, token *
 	query := `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
 		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, created_at`
-	
+
 	err := s.db.QueryRow(ctx, s.db.Rebind(query),
 		token.UserID,
 		token.TokenHash,
@@ -149,7 +149,7 @@ func (s *DatabaseTokenStore) FindPasswordResetToken(ctx context.Context, tokenHa
 	token := &PasswordResetToken{}
 	query := `SELECT id, user_id, token_hash, expires_at, created_at, used_at
 		 FROM password_reset_tokens WHERE token_hash = $1`
-	
+
 	err := s.db.QueryRow(ctx, s.db.Rebind(query), tokenHash).Scan(
 		&token.ID, &token.UserID, &token.TokenHash, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt,
 	)
@@ -164,7 +164,7 @@ func (s *DatabaseTokenStore) FindPasswordResetToken(ctx context.Context, tokenHa
 // MarkPasswordResetUsed marks a password reset token as used.
 func (s *DatabaseTokenStore) MarkPasswordResetUsed(ctx context.Context, tokenHash string) error {
 	query := `UPDATE password_reset_tokens SET used_at = $1 WHERE token_hash = $2`
-	
+
 	err := s.db.Exec(ctx, s.db.Rebind(query), time.Now().UTC().Truncate(time.Second), tokenHash)
 
 	if err != nil {

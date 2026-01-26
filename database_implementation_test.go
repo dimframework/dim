@@ -121,8 +121,7 @@ func TestDatabaseTokenStore_SQLite(t *testing.T) {
 	store := NewDatabaseTokenStore(db)
 	ctx := context.Background()
 
-
-token := &RefreshToken{
+	token := &RefreshToken{
 		UserID:    "550e8400-e29b-41d4-a716-446655440000",
 		TokenHash: "hash123",
 		UserAgent: "test-agent",

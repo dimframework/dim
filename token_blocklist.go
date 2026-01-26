@@ -114,7 +114,7 @@ func (p *DatabaseBlocklist) IsRevoked(ctx context.Context, identifier string) (b
 	} else {
 		query = p.db.Rebind(`SELECT EXISTS(SELECT 1 FROM token_blocklist WHERE identifier = $1 AND expires_at > NOW())`)
 	}
-	
+
 	err := p.db.QueryRow(ctx, query, identifier).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to check blocklist: %w", err)
