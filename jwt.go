@@ -123,6 +123,10 @@ func (m *JWTManager) GenerateAccessToken(userID string, email string, sessionID 
 
 	token := jwt.NewWithClaims(method, claims)
 
+	// Set typ header to "at+jwt" untuk menandakan ini adalah access token
+	// Sesuai dengan RFC 9068 (JSON Web Token Profile for OAuth 2.0 Access Tokens)
+	token.Header["typ"] = "at+jwt"
+
 	// Jika menggunakan Asymmetric, tambahkan 'kid' ke header jika logika sistem membutuhkannya.
 	// Logika saat ini menggunakan "default" yang berasal dari PrivateKey. Implementasi nyata mungkin menggunakan KID tertentu.
 	// Demi kesederhanaan, kita tidak menyetel KID di header untuk saat ini kecuali kita mengimplementasikan manajemen rotasi penuh untuk Signing Key.
@@ -165,6 +169,10 @@ func (m *JWTManager) GenerateRefreshToken(userID, sessionID string) (string, err
 	}
 
 	token := jwt.NewWithClaims(method, claims)
+
+	// Set typ header to "rt+jwt" untuk menandakan ini adalah refresh token
+	// Sesuai dengan konvensi RFC 9068
+	token.Header["typ"] = "rt+jwt"
 
 	return token.SignedString(m.signingKey)
 }
@@ -228,6 +236,13 @@ func (m *JWTManager) VerifyToken(tokenString string) (jwt.MapClaims, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 
+	// Validasi header typ untuk memastikan ini adalah access token (at+jwt)
+	// Mencegah penggunaan refresh token sebagai access token
+	typ, ok := token.Header["typ"].(string)
+	if !ok || typ != "at+jwt" {
+		return nil, fmt.Errorf("invalid token type: expected access token")
+	}
+
 	return claims, nil
 }
 
@@ -252,6 +267,13 @@ func (m *JWTManager) VerifyRefreshToken(tokenString string) (string, string, err
 
 	if !token.Valid {
 		return "", "", fmt.Errorf("invalid token")
+	}
+
+	// Validasi header typ untuk memastikan ini adalah refresh token (rt+jwt)
+	// Mencegah penggunaan access token sebagai refresh token
+	typ, ok := token.Header["typ"].(string)
+	if !ok || typ != "rt+jwt" {
+		return "", "", fmt.Errorf("invalid token type: expected refresh token")
 	}
 
 	sub, ok := claims["sub"].(string)

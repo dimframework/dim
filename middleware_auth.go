@@ -5,6 +5,25 @@ import (
 	"net/http"
 )
 
+// authMiddlewareConfig holds configuration for auth middleware
+type authMiddlewareConfig struct {
+	logger *Logger
+}
+
+// AuthMiddlewareOption adalah function type untuk konfigurasi RequireAuth middleware
+type AuthMiddlewareOption func(*authMiddlewareConfig)
+
+// WithAuthLogger menambahkan logger ke RequireAuth middleware untuk logging internal errors
+//
+// Example:
+//
+//	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist, WithAuthLogger(logger)))
+func WithAuthLogger(logger *Logger) AuthMiddlewareOption {
+	return func(c *authMiddlewareConfig) {
+		c.logger = logger
+	}
+}
+
 // ExpectBearerToken adalah middleware yang hanya memeriksa keberadaan header `Authorization: Bearer <token>`.
 // **TIDAK AMAN**: Middleware ini TIDAK memverifikasi validitas token itu sendiri.
 // Gunakan ini hanya untuk kasus penggunaan lanjutan di mana verifikasi dilakukan secara manual di tempat lain.
@@ -53,6 +72,7 @@ func AllowBearerToken() MiddlewareFunc {
 // Parameters:
 //   - jwtManager: *JWTManager untuk verifikasi token.
 //   - blocklist: TokenBlocklist interface (opsional, pass nil jika tidak digunakan).
+//   - opts: variadic AuthMiddlewareOption untuk konfigurasi tambahan (opsional).
 //
 // Returns:
 //   - MiddlewareFunc: Middleware yang memberlakukan autentikasi aman.
@@ -60,8 +80,16 @@ func AllowBearerToken() MiddlewareFunc {
 // Example:
 //
 //	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist))
+//	// Dengan logger untuk internal error logging:
+//	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist, WithAuthLogger(logger)))
 //	// Di dalam handler, gunakan GetUser(req) untuk mendapatkan pengguna yang terautentikasi.
-func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist) MiddlewareFunc {
+func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthMiddlewareOption) MiddlewareFunc {
+	// Apply options
+	cfg := &authMiddlewareConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return func(next HandlerFunc) HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			token, ok := GetAuthToken(r)
@@ -75,6 +103,14 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist) MiddlewareFun
 			// Verify token
 			claims, err := jwtManager.VerifyToken(token)
 			if err != nil {
+				// Log internal error jika logger tersedia
+				if cfg.logger != nil {
+					cfg.logger.Warn("Token verification failed",
+						"error", err.Error(),
+						"path", r.URL.Path,
+						"method", r.Method,
+					)
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				JsonError(w, http.StatusUnauthorized, "Token tidak valid atau telah kadaluarsa", nil)
@@ -98,6 +134,13 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist) MiddlewareFun
 				if sid, ok := claims["sid"].(string); ok && sid != "" {
 					revoked, err := blocklist.IsRevoked(r.Context(), sid)
 					if err != nil {
+						// Log internal error jika logger tersedia
+						if cfg.logger != nil {
+							cfg.logger.Error("Failed to check token blocklist",
+								"error", err.Error(),
+								"session_id", sid,
+							)
+						}
 						w.Header().Set("Content-Type", "application/json")
 						w.WriteHeader(http.StatusInternalServerError)
 						JsonError(w, http.StatusInternalServerError, "Gagal memverifikasi status token", nil)

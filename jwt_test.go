@@ -171,6 +171,102 @@ func TestIsTokenExpired(t *testing.T) {
 	}
 }
 
+func TestVerifyToken_RejectsRefreshToken(t *testing.T) {
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
+
+	// Generate refresh token (typ: rt+jwt)
+	refreshToken, _ := manager.GenerateRefreshToken("1", "sid-123")
+
+	// Try to verify refresh token using VerifyToken (which expects access token typ: at+jwt)
+	_, err = manager.VerifyToken(refreshToken)
+	if err == nil {
+		t.Errorf("VerifyToken() should reject refresh token")
+	}
+
+	// Verify error message indicates token type mismatch
+	if err != nil && err.Error() != "invalid token type: expected access token" {
+		t.Errorf("Expected 'invalid token type: expected access token', got: %v", err)
+	}
+}
+
+func TestVerifyRefreshToken_RejectsAccessToken(t *testing.T) {
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
+
+	// Generate access token (typ: at+jwt)
+	accessToken, _ := manager.GenerateAccessToken("1", "test@example.com", "sid-123", nil)
+
+	// Try to verify access token using VerifyRefreshToken (which expects refresh token typ: rt+jwt)
+	_, _, err = manager.VerifyRefreshToken(accessToken)
+	if err == nil {
+		t.Errorf("VerifyRefreshToken() should reject access token")
+	}
+
+	// Verify error message indicates token type mismatch
+	if err != nil && err.Error() != "invalid token type: expected refresh token" {
+		t.Errorf("Expected 'invalid token type: expected refresh token', got: %v", err)
+	}
+}
+
+func TestTokenTypeHeader(t *testing.T) {
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+	manager, err := NewJWTManager(config)
+	if err != nil {
+		t.Fatalf("NewJWTManager error: %v", err)
+	}
+
+	t.Run("AccessToken_HasCorrectTypHeader", func(t *testing.T) {
+		accessToken, _ := manager.GenerateAccessToken("1", "test@example.com", "sid-123", nil)
+
+		// Verify access token can be verified with VerifyToken
+		claims, err := manager.VerifyToken(accessToken)
+		if err != nil {
+			t.Errorf("VerifyToken() should succeed for access token: %v", err)
+		}
+		if claims == nil {
+			t.Error("Claims should not be nil")
+		}
+	})
+
+	t.Run("RefreshToken_HasCorrectTypHeader", func(t *testing.T) {
+		refreshToken, _ := manager.GenerateRefreshToken("1", "sid-123")
+
+		// Verify refresh token can be verified with VerifyRefreshToken
+		userID, sessionID, err := manager.VerifyRefreshToken(refreshToken)
+		if err != nil {
+			t.Errorf("VerifyRefreshToken() should succeed for refresh token: %v", err)
+		}
+		if userID != "1" {
+			t.Errorf("userID = %s, want 1", userID)
+		}
+		if sessionID != "sid-123" {
+			t.Errorf("sessionID = %s, want sid-123", sessionID)
+		}
+	})
+}
+
 func TestDifferentSecrets(t *testing.T) {
 	config1 := &JWTConfig{
 		HMACSecret:         "secret1",
