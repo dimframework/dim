@@ -40,6 +40,7 @@ type AuthService struct {
 	jwtManager     *JWTManager
 	pwValidator    *PasswordValidator
 	claimsProvider ClaimsProvider
+	logger         *Logger
 }
 
 // NewAuthService membuat instance AuthService baru.
@@ -66,6 +67,19 @@ func NewAuthService(
 // Method ini menggunakan pola chaining untuk memudahkan konfigurasi.
 func (s *AuthService) WithClaimsProvider(provider ClaimsProvider) *AuthService {
 	s.claimsProvider = provider
+	return s
+}
+
+// WithLogger mengatur logger untuk AuthService dan mengembalikan instance service.
+// Logger digunakan untuk mencatat internal errors yang tidak dikirim ke client.
+// Method ini menggunakan pola chaining untuk memudahkan konfigurasi.
+//
+// Example:
+//
+//	authService, _ := dim.NewAuthService(userStore, tokenStore, blocklist, jwtConfig)
+//	authService.WithLogger(logger).WithClaimsProvider(claimsProvider)
+func (s *AuthService) WithLogger(logger *Logger) *AuthService {
+	s.logger = logger
 	return s
 }
 
@@ -158,6 +172,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 	// Verify refresh token
 	userID, sessionID, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
+		// Log internal error jika logger tersedia
+		if s.logger != nil {
+			s.logger.Warn("Refresh token verification failed", "error", err.Error())
+		}
 		return "", "", NewAppError("Refresh token tidak valid", 401)
 	}
 
@@ -342,6 +360,10 @@ func (s *AuthService) Logout(ctx context.Context, refreshTokenStr string) error 
 	// Kita abaikan userID karena tidak digunakan disini
 	_, sid, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
+		// Log internal error jika logger tersedia
+		if s.logger != nil {
+			s.logger.Warn("Logout: refresh token verification failed", "error", err.Error())
+		}
 		return NewAppError("Refresh token tidak valid atau expired", 400)
 	}
 
@@ -353,7 +375,9 @@ func (s *AuthService) Logout(ctx context.Context, refreshTokenStr string) error 
 		// Untuk amannya, kita set 1 jam.
 		if err := s.blocklist.Invalidate(ctx, sid, 1*time.Hour); err != nil {
 			// Log error tapi jangan gagalkan logout, lanjut ke revoke refresh token
-			fmt.Printf("Warning: failed to blacklist session %s: %v\n", sid, err)
+			if s.logger != nil {
+				s.logger.Warn("Failed to blacklist session", "session_id", sid, "error", err.Error())
+			}
 		}
 	}
 

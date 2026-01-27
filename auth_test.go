@@ -1,8 +1,11 @@
 package dim
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,4 +234,120 @@ func TestRequestPasswordResetSuccess(t *testing.T) {
 	if token == "" {
 		t.Error("RequestPasswordReset() should return token")
 	}
+}
+
+func TestAuthService_WithLogger(t *testing.T) {
+	userStore := NewMockUserStore()
+	tokenStore := NewMockTokenStore()
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+
+	var buf bytes.Buffer
+	logger := NewLoggerWithWriter(&buf, slog.LevelDebug)
+
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
+
+	// Test chaining
+	result := service.WithLogger(logger)
+	if result != service {
+		t.Error("WithLogger should return the same service instance for chaining")
+	}
+}
+
+func TestAuthService_RefreshToken_LogsTokenTypeError(t *testing.T) {
+	userStore := NewMockUserStore()
+	tokenStore := NewMockTokenStore()
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
+	// Create logger with buffer to capture output
+	var buf bytes.Buffer
+	logger := NewLoggerWithWriter(&buf, slog.LevelDebug)
+
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
+	service.WithLogger(logger)
+
+	ctx := context.Background()
+
+	// Login to get tokens
+	accessToken, _, err := service.Login(ctx, "test@example.com", "ValidPass123!")
+	if err != nil {
+		t.Fatalf("Login error: %v", err)
+	}
+
+	// Try to use ACCESS token as refresh token - should fail and log error
+	_, _, err = service.RefreshToken(ctx, accessToken)
+	if err == nil {
+		t.Error("RefreshToken should fail when using access token")
+	}
+
+	// Check log output contains the error
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "Refresh token verification failed") {
+		t.Errorf("Expected log to contain 'Refresh token verification failed', got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "invalid token type: expected refresh token") {
+		t.Errorf("Expected log to contain 'invalid token type: expected refresh token', got: %s", logOutput)
+	}
+}
+
+func TestAuthService_RefreshToken_NoLogWithoutLogger(t *testing.T) {
+	userStore := NewMockUserStore()
+	tokenStore := NewMockTokenStore()
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	userStore.AddUser(&MockUser{
+		ID:       "1",
+		Email:    "test@example.com",
+		Password: hashedPassword,
+	})
+
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
+	// Note: NOT calling WithLogger - logger is nil
+
+	ctx := context.Background()
+
+	// Login to get tokens
+	accessToken, _, err := service.Login(ctx, "test@example.com", "ValidPass123!")
+	if err != nil {
+		t.Fatalf("Login error: %v", err)
+	}
+
+	// Try to use ACCESS token as refresh token - should fail but NOT panic
+	_, _, err = service.RefreshToken(ctx, accessToken)
+	if err == nil {
+		t.Error("RefreshToken should fail when using access token")
+	}
+
+	// Test passes if no panic occurred
 }
