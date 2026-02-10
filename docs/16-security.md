@@ -421,19 +421,26 @@ email := strings.ToLower(req.Email)
 CORS_ALLOWED_ORIGINS=https://example.com,https://app.example.com
 CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,PATCH
 CORS_ALLOWED_HEADERS=Content-Type,Authorization
+
+// Gunakan ExposedHeaders jika client perlu baca custom header
+CORS_EXPOSED_HEADERS=X-Custom-Token
+
 CORS_ALLOW_CREDENTIALS=true
+CORS_MAX_AGE=3600             // Cache preflight 1 jam
 
-// ❌ BURUK - Allow all origins
+// ❌ BURUK - Allow all origins dengan credentials
 CORS_ALLOWED_ORIGINS=*
-
-// ❌ BURUK - Allow all methods
-CORS_ALLOWED_METHODS=*
+CORS_ALLOW_CREDENTIALS=true   // Ini bisa menyebabkan security risk
 ```
 
-### ✅ DO: Disable Credentials if Not Needed
+### ✅ DO: Use `Vary: Origin`
 
-```
-CORS_ALLOW_CREDENTIALS=false  // If not using cookies/auth
+Middleware `dim` secara otomatis menambahkan header `Vary: Origin` untuk mencegah cache poisoning pada CORS requests.
+
+```go
+// Response header otomatis:
+Vary: Origin
+Access-Control-Allow-Origin: https://example.com
 ```
 
 ---
@@ -446,8 +453,19 @@ CORS_ALLOW_CREDENTIALS=false  // If not using cookies/auth
 // ✅ BAIK - Enable CSRF
 CSRF_ENABLED=true
 
-router.Use(dim.CSRF(cfg.CSRF))
+// Atur Cookie Max Age (expired otomatis)
+CSRF_COOKIE_MAX_AGE=43200 // 12 Jam
+
+router.Use(dim.CSRFMiddleware(cfg.CSRF))
 ```
+
+**Note**: Jika validasi CSRF gagal (token missing, invalid, atau expired), server akan mengembalikan HTTP Status **419 Authentication Timeout**. Client harus me-refresh halaman atau me-request token baru.
+
+### ✅ DO: Understand Cookie Behavior
+
+- Cookie di-set dengan `HttpOnly=false` agar bisa dibaca JS client.
+- `SameSite=Lax` mencegah serangan CSRF dari majority browser modern.
+- Token validasi menggunakan pola **Double Submit Cookie** (bandingkan Header vs Cookie).
 
 ### ✅ DO: Include Token in Forms
 

@@ -308,6 +308,9 @@ CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,PATCH,OPTIONS
 # Allowed headers (comma-separated)
 CORS_ALLOWED_HEADERS=Content-Type,Authorization,X-CSRF-Token
 
+# Exposed headers (comma-separated) - Header response yang boleh dibaca client
+CORS_EXPOSED_HEADERS=X-Custom-Token,X-Request-Id
+
 # Allow credentials (cookies, auth) - true|false
 CORS_ALLOW_CREDENTIALS=true
 
@@ -322,6 +325,7 @@ type CORSConfig struct {
     AllowedOrigins   []string
     AllowedMethods   []string
     AllowedHeaders   []string
+    ExposedHeaders   []string
     AllowCredentials bool
     MaxAge           int
 }
@@ -373,17 +377,21 @@ CSRF_COOKIE_NAME             → "csrf_token"
 
 # Header name untuk token
 CSRF_HEADER_NAME=X-CSRF-Token
+
+# Cookie Max Age dalam detik (default: 43200 / 12 jam)
+CSRF_COOKIE_MAX_AGE=43200
 ```
 
 ### CSRF Config Struct
 
 ```go
 type CSRFConfig struct {
-    Enabled     bool
-    ExemptPaths []string
-    TokenLength int
-    CookieName  string
-    HeaderName  string
+    Enabled      bool
+    ExemptPaths  []string
+    TokenLength  int
+    CookieName   string
+    HeaderName   string
+    CookieMaxAge int
 }
 ```
 

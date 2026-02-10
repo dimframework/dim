@@ -123,17 +123,23 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 ## Melindungi Route
 
-Gunakan middleware `RequireAuth`.
+Gunakan middleware `RequireAuth`. Middleware ini fleksibel dan dapat dikonfigurasi untuk mengambil token dari Header (default) atau Cookie.
 
 ```go
-// Inisialisasi Middleware (sekarang membutuhkan blocklist opsional)
-// Jika Anda tidak menggunakan blocklist, pass 'nil'
-authMiddleware := dim.RequireAuth(jwtManager, nil)
-
-// Atau dengan Blocklist (untuk fitur logout langsung)
+// Inisialisasi Middleware (Basic - Bearer Token)
 authMiddleware := dim.RequireAuth(jwtManager, blocklistStore)
 
+// Opsi Lanjutan: Mengambil token dari Cookie (misal nama cookie "session_id")
+// Cocok untuk aplikasi web tradisional / SPA yang menggunakan cookie HttpOnly
+cookieAuthMiddleware := dim.RequireAuth(
+    jwtManager, 
+    blocklistStore,
+    dim.WithCookieToken("session_id"),
+)
+
+// Terapkan ke Route
 router.Get("/profile", profileHandler, authMiddleware)
+router.Get("/dashboard", dashboardHandler, cookieAuthMiddleware)
 ```
         user.Email, 
         nil,

@@ -49,7 +49,7 @@ router.Use(dim.LoggerMiddleware(logger))
 
 // 3. CORS & CSRF - SEBELUM AUTH
 router.Use(dim.CORS(corsConfig))
-router.Use(dim.CSRF(csrfConfig))
+router.Use(dim.CSRFMiddleware(csrfConfig))
 
 // 4. AUTH - Per grup/rute
 // 5. HANDLER
@@ -90,6 +90,41 @@ router.Use(dim.LoggerMiddleware(logger))
 
 ---
 
+## CORS Middleware
+
+Menangani Cross-Origin Resource Sharing. Wajib jika API diakses dari browser dengan domain berbeda.
+
+### Fitur
+- Whitelist origin (exact match atau wildcard `*`).
+- Support credentials (cookie, auth header).
+- Support `ExposedHeaders` agar client bisa membaca custom header.
+- Validasi integer `MaxAge` yang ketat.
+- Mengembalikan `204 No Content` untuk Preflight (OPTIONS).
+- Support `Vary: Origin` untuk caching yang benar.
+
+```go
+router.Use(dim.CORS(corsConfig))
+```
+
+---
+
+## CSRF Middleware
+
+Melindungi dari serangan Cross-Site Request Forgery (CSRF). Penting untuk aplikasi yang menggunakan cookie session.
+
+### Fitur
+- Validasi token via Header (`X-CSRF-Token`) atau Form (`_csrf`).
+- **Cookie MaxAge**: Token expires otomatis sesuai konfigurasi (default 12 jam).
+- Exempt paths: Skip validasi untuk path tertentu (e.g. webhook, public API).
+- Double Submit Cookie pattern.
+- Mengembalikan **419 Authentication Timeout** jika token tidak valid atau expired (standar industri modern).
+
+```go
+router.Use(dim.CSRFMiddleware(csrfConfig))
+```
+
+---
+
 ## Auth Middleware
 
 Melindungi route dengan memverifikasi JWT.
@@ -98,8 +133,18 @@ Melindungi route dengan memverifikasi JWT.
 
 Wajib login. Jika token tidak valid, return 401.
 
+Mendukung pengambilan token dari Header (Bearer) maupun Cookie.
+
 ```go
-api := router.Group("/api", dim.RequireAuth(jwtManager))
+// Default: Mengambil dari header "Authorization: Bearer <token>"
+api := router.Group("/api", dim.RequireAuth(jwtManager, blocklistStore))
+
+// Opsi: Mengambil dari Cookie "auth_token" (untuk web app)
+web := router.Group("/web", dim.RequireAuth(
+    jwtManager, 
+    blocklistStore, 
+    dim.WithCookieToken("auth_token"),
+))
 ```
 
 ### `OptionalAuth`
