@@ -6,11 +6,14 @@ import (
 	"net/http"
 )
 
+// StatusAuthenticationTimeout is 419 Authentication Timeout (unofficial)
+const StatusAuthenticationTimeout = 419
+
 // CSRFMiddleware membuat middleware yang handle CSRF (Cross-Site Request Forgery) protection.
 // Middleware ini verify CSRF token untuk unsafe HTTP methods (POST, PUT, DELETE, PATCH).
 // Safe methods (GET, HEAD, OPTIONS) dan exempt paths di-skip dari CSRF check.
 // Token divalidasi dengan membandingkan value dari header/form dengan value dari cookie.
-// Mengembalikan 403 Forbidden jika token tidak valid atau tidak match.
+// Mengembalikan 419 Authentication Timeout jika token tidak valid atau tidak match.
 //
 // Parameters:
 //   - config: CSRFConfig yang berisi enabled status, header name, cookie name, exempt paths
@@ -42,8 +45,8 @@ func CSRFMiddleware(config CSRFConfig) MiddlewareFunc {
 
 			if token == "" || cookieToken == "" || token != cookieToken {
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				JsonError(w, http.StatusForbidden, "Validasi token CSRF gagal", nil)
+				w.WriteHeader(StatusAuthenticationTimeout)
+				JsonError(w, StatusAuthenticationTimeout, "Validasi token CSRF gagal", nil)
 				return
 			}
 
@@ -97,8 +100,9 @@ func SetCSRFToken(w http.ResponseWriter, token string, config CSRFConfig) {
 		Name:     config.CookieName,
 		Value:    token,
 		Path:     "/",
-		HttpOnly: false, // Must be accessible from JavaScript
+		HttpOnly: false,                // Must be accessible from JavaScript
 		SameSite: http.SameSiteLaxMode,
+		MaxAge:   config.CookieMaxAge, // Menggunakan konfigurasi MaxAge (default 12 jam)
 	}
 	http.SetCookie(w, cookie)
 }

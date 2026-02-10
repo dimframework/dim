@@ -94,8 +94,8 @@ func TestCSRFMiddlewarePOSTInvalid(t *testing.T) {
 
 	wrappedHandler(w, r)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("POST with invalid CSRF token should return 403")
+	if w.Code != 419 {
+		t.Errorf("POST with invalid CSRF token should return 419, got %d", w.Code)
 	}
 }
 
@@ -167,7 +167,8 @@ func TestGenerateCSRFToken(t *testing.T) {
 
 func TestSetCSRFToken(t *testing.T) {
 	config := CSRFConfig{
-		CookieName: "csrf_token",
+		CookieName:   "csrf_token",
+		CookieMaxAge: 3600,
 	}
 
 	token := "test_token_123"
@@ -182,5 +183,9 @@ func TestSetCSRFToken(t *testing.T) {
 
 	if cookies[0].Value != token {
 		t.Errorf("cookie value mismatch")
+	}
+
+	if cookies[0].MaxAge != 3600 {
+		t.Errorf("expected cookie MaxAge 3600, got %d", cookies[0].MaxAge)
 	}
 }
