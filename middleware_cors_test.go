@@ -80,12 +80,37 @@ func TestCORSMiddlewarePreflight(t *testing.T) {
 
 	wrappedHandler(w, r)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("preflight status code = %d, want 200", w.Code)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("preflight status code = %d, want 204", w.Code)
 	}
 
 	if w.Header().Get("Access-Control-Allow-Methods") == "" {
 		t.Errorf("CORS methods header not set")
+	}
+}
+
+func TestCORSMiddlewareOptionsPassthrough(t *testing.T) {
+	config := CORSConfig{
+		AllowedOrigins: []string{"http://localhost:3000"},
+	}
+
+	corsMiddleware := CORS(config)
+	handlerCalled := false
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	}
+
+	wrappedHandler := corsMiddleware(handler)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("OPTIONS", "/", nil)
+	// No Origin header
+
+	wrappedHandler(w, r)
+
+	if !handlerCalled {
+		t.Errorf("OPTIONS request without Origin should be passed to next handler")
 	}
 }
 

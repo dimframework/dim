@@ -2,6 +2,7 @@ package dim
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -36,6 +37,7 @@ func CORS(config CORSConfig) MiddlewareFunc {
 
 			if isAllowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
 
 				if config.AllowCredentials {
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -44,14 +46,19 @@ func CORS(config CORSConfig) MiddlewareFunc {
 				w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 				w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 
+				if len(config.ExposedHeaders) > 0 {
+					w.Header().Set("Access-Control-Expose-Headers", strings.Join(config.ExposedHeaders, ", "))
+				}
+
 				if config.MaxAge > 0 {
-					w.Header().Set("Access-Control-Max-Age", string(rune(config.MaxAge)))
+					w.Header().Set("Access-Control-Max-Age", strconv.Itoa(config.MaxAge))
 				}
 			}
 
 			// Handle preflight requests
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusOK)
+			// Hanya intercept jika method OPTIONS DAN memiliki header Origin (indikasi CORS preflight)
+			if r.Method == http.MethodOptions && origin != "" {
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 
