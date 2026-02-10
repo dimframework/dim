@@ -108,17 +108,19 @@ type CORSConfig struct {
 	AllowedOrigins   []string
 	AllowedMethods   []string
 	AllowedHeaders   []string
+	ExposedHeaders   []string
 	AllowCredentials bool
 	MaxAge           int
 }
 
 // CSRFConfig holds CSRF configuration
 type CSRFConfig struct {
-	Enabled     bool
-	ExemptPaths []string
-	TokenLength int
-	CookieName  string
-	HeaderName  string
+	Enabled      bool
+	ExemptPaths  []string
+	TokenLength  int
+	CookieName   string
+	HeaderName   string
+	CookieMaxAge int
 }
 
 // LoadConfig memuat konfigurasi aplikasi dari environment variables.
@@ -408,6 +410,18 @@ func loadCORSConfig() (CORSConfig, error) {
 		headers[i] = strings.TrimSpace(headers[i])
 	}
 
+	exposedHeadersStr := GetEnvOrDefault("CORS_EXPOSED_HEADERS", "")
+	exposedHeaders := []string{}
+	if exposedHeadersStr != "" {
+		parts := strings.Split(exposedHeadersStr, ",")
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				exposedHeaders = append(exposedHeaders, trimmed)
+			}
+		}
+	}
+
 	maxAge, err := ParseEnvInt(GetEnvOrDefault("CORS_MAX_AGE", "3600"))
 	if err != nil {
 		return CORSConfig{}, fmt.Errorf("invalid CORS_MAX_AGE: %w", err)
@@ -417,6 +431,7 @@ func loadCORSConfig() (CORSConfig, error) {
 		AllowedOrigins:   origins,
 		AllowedMethods:   methods,
 		AllowedHeaders:   headers,
+		ExposedHeaders:   exposedHeaders,
 		AllowCredentials: ParseEnvBool(GetEnvOrDefault("CORS_ALLOW_CREDENTIALS", "true")),
 		MaxAge:           maxAge,
 	}, nil
@@ -438,12 +453,18 @@ func loadCSRFConfig() (CSRFConfig, error) {
 		return CSRFConfig{}, fmt.Errorf("invalid CSRF_TOKEN_LENGTH: %w", err)
 	}
 
+	cookieMaxAge, err := ParseEnvInt(GetEnvOrDefault("CSRF_COOKIE_MAX_AGE", "43200")) // Default 12 jam
+	if err != nil {
+		return CSRFConfig{}, fmt.Errorf("invalid CSRF_COOKIE_MAX_AGE: %w", err)
+	}
+
 	return CSRFConfig{
-		Enabled:     ParseEnvBool(GetEnvOrDefault("CSRF_ENABLED", "true")),
-		ExemptPaths: exemptPaths,
-		TokenLength: tokenLength,
-		CookieName:  GetEnvOrDefault("CSRF_COOKIE_NAME", "csrf_token"),
-		HeaderName:  GetEnvOrDefault("CSRF_HEADER_NAME", "X-CSRF-Token"),
+		Enabled:      ParseEnvBool(GetEnvOrDefault("CSRF_ENABLED", "true")),
+		ExemptPaths:  exemptPaths,
+		TokenLength:  tokenLength,
+		CookieName:   GetEnvOrDefault("CSRF_COOKIE_NAME", "csrf_token"),
+		HeaderName:   GetEnvOrDefault("CSRF_HEADER_NAME", "X-CSRF-Token"),
+		CookieMaxAge: cookieMaxAge,
 	}, nil
 }
 
