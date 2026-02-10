@@ -7,8 +7,12 @@ import (
 
 // authMiddlewareConfig holds configuration for auth middleware
 type authMiddlewareConfig struct {
-	logger *Logger
+	logger     *Logger
+	extractors []TokenExtractor
 }
+
+// TokenExtractor is a function that extracts a token from a request
+type TokenExtractor func(*http.Request) (string, bool)
 
 // AuthMiddlewareOption adalah function type untuk konfigurasi RequireAuth middleware
 type AuthMiddlewareOption func(*authMiddlewareConfig)
@@ -22,6 +26,56 @@ func WithAuthLogger(logger *Logger) AuthMiddlewareOption {
 	return func(c *authMiddlewareConfig) {
 		c.logger = logger
 	}
+}
+
+// WithBearerToken enables extracting token from "Authorization: Bearer <token>" header.
+// This is the default behavior if no other extractor is configured.
+func WithBearerToken() AuthMiddlewareOption {
+	return func(c *authMiddlewareConfig) {
+		c.extractors = append(c.extractors, ExtractBearerToken)
+	}
+}
+
+// WithCookieToken enables extracting token from a cookie with the given name.
+func WithCookieToken(cookieName string) AuthMiddlewareOption {
+	return func(c *authMiddlewareConfig) {
+		c.extractors = append(c.extractors, ExtractCookieToken(cookieName))
+	}
+}
+
+// ExtractBearerToken extracts token from Authorization header
+func ExtractBearerToken(r *http.Request) (string, bool) {
+	return GetAuthToken(r)
+}
+
+// ExtractCookieToken creates an extractor for a specific cookie
+func ExtractCookieToken(name string) TokenExtractor {
+	return func(r *http.Request) (string, bool) {
+		cookie, err := r.Cookie(name)
+		if err != nil {
+			return "", false
+		}
+		if cookie.Value == "" {
+			return "", false
+		}
+		return cookie.Value, true
+	}
+}
+
+// getConfiguredToken extracts token using configured extractors or default Bearer extractor
+func getConfiguredToken(r *http.Request, cfg *authMiddlewareConfig) (string, bool) {
+	if len(cfg.extractors) == 0 {
+		return ExtractBearerToken(r)
+	}
+
+	for _, extractor := range cfg.extractors {
+		token, ok := extractor(r)
+		if ok {
+			return token, true
+		}
+	}
+
+	return "", false
 }
 
 // ExpectBearerToken adalah middleware yang hanya memeriksa keberadaan header `Authorization: Bearer <token>`.
@@ -92,11 +146,11 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthM
 
 	return func(next HandlerFunc) HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			token, ok := GetAuthToken(r)
+			token, ok := getConfiguredToken(r, cfg)
 			if !ok {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				JsonError(w, http.StatusUnauthorized, "Header otorisasi hilang atau tidak valid", nil)
+				JsonError(w, http.StatusUnauthorized, "Token otorisasi hilang atau tidak valid", nil)
 				return
 			}
 
@@ -183,14 +237,19 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthM
 // Returns:
 //   - MiddlewareFunc: Middleware yang memungkinkan autentikasi opsional dengan verifikasi.
 //
-// Example:
-//
-//	router.Get("/semi-protected", handler, OptionalAuth(jwtManager))
-//	// Di dalam handler: user, ok := GetUser(req); if ok { /* authenticated */ }
-func OptionalAuth(jwtManager *JWTManager) MiddlewareFunc {
+// RequiresAuth check logic implemented above.
+
+// OptionalAuth is updated to support options too
+func OptionalAuth(jwtManager *JWTManager, opts ...AuthMiddlewareOption) MiddlewareFunc {
+	// Apply options
+	cfg := &authMiddlewareConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return func(next HandlerFunc) HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			token, ok := GetAuthToken(r)
+			token, ok := getConfiguredToken(r, cfg)
 			if ok {
 				// Try to verify token
 				if claims, err := jwtManager.VerifyToken(token); err == nil {

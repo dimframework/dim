@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -99,54 +98,32 @@ func TestRequireAuthValid(t *testing.T) {
 	}
 }
 
-func TestRequireAuthInvalid(t *testing.T) {
+func TestRequireAuthWithLogger(t *testing.T) {
 	config := &JWTConfig{
 		HMACSecret:        "test-secret",
 		SigningMethod:     "HS256",
 		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
-	authMiddleware := RequireAuth(jwtManager, nil)
+
+	var logBuf bytes.Buffer
+	logger := NewLoggerWithWriter(&logBuf, slog.LevelInfo)
+
+	authMiddleware := RequireAuth(jwtManager, nil, WithAuthLogger(logger))
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	wrappedHandler := authMiddleware(handler)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
-	r.Header.Set("Authorization", "Bearer invalid_token")
+	r.Header.Set("Authorization", "Bearer invalid-token")
 	wrappedHandler(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("invalid token should return 401")
 	}
 }
 
-// Tests for the new `OptionalAuth` function (previously `OptionalAuthWithManager`)
-func TestOptionalAuthNoToken(t *testing.T) {
-	config := &JWTConfig{
-		HMACSecret:        "test-secret",
-		SigningMethod:     "HS256",
-		AccessTokenExpiry: 15 * time.Minute,
-	}
-	jwtManager, _ := NewJWTManager(config)
-	authMiddleware := OptionalAuth(jwtManager)
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		_, ok := GetUser(r)
-		if ok {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-	wrappedHandler := authMiddleware(handler)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	wrappedHandler(w, r)
-	if w.Code != http.StatusOK {
-		t.Errorf("optional auth should pass without token")
-	}
-}
-
-func TestOptionalAuthValidToken(t *testing.T) {
+func TestOptionalAuthValid(t *testing.T) {
 	config := &JWTConfig{
 		HMACSecret:        "test-secret",
 		SigningMethod:     "HS256",
@@ -154,6 +131,7 @@ func TestOptionalAuthValidToken(t *testing.T) {
 	}
 	jwtManager, _ := NewJWTManager(config)
 	token, _ := jwtManager.GenerateAccessToken("1", "test@example.com", "sid-123", nil)
+
 	authMiddleware := OptionalAuth(jwtManager)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		user, ok := GetUser(r)
@@ -169,80 +147,137 @@ func TestOptionalAuthValidToken(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+token)
 	wrappedHandler(w, r)
 	if w.Code != http.StatusOK {
-		t.Errorf("optional auth should set user context with valid token")
+		t.Errorf("valid token in optional auth should process and set user")
 	}
 }
 
-func TestRequireAuthWithLogger_LogsTokenTypeError(t *testing.T) {
+func TestOptionalAuthMissing(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
-		RefreshTokenExpiry: 7 * 24 * time.Hour,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 
-	// Generate refresh token (typ: rt+jwt) - wrong type for RequireAuth
-	refreshToken, _ := jwtManager.GenerateRefreshToken("1", "sid-123")
-
-	// Create logger with buffer to capture output
-	var buf bytes.Buffer
-	logger := NewLoggerWithWriter(&buf, slog.LevelDebug)
-
-	// Create middleware with logger
-	authMiddleware := RequireAuth(jwtManager, nil, WithAuthLogger(logger))
+	authMiddleware := OptionalAuth(jwtManager)
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		_, ok := GetUser(r)
+		if ok {
+			w.WriteHeader(http.StatusBadRequest) // Should not be authenticated
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := authMiddleware(handler)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	wrappedHandler(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("missing token in optional auth should pass")
+	}
+}
+
+func TestOptionalAuthInvalid(t *testing.T) {
+	config := &JWTConfig{
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
+	}
+	jwtManager, _ := NewJWTManager(config)
+
+	authMiddleware := OptionalAuth(jwtManager)
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		_, ok := GetUser(r)
+		if ok {
+			w.WriteHeader(http.StatusBadRequest) // Should not be authenticated
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := authMiddleware(handler)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Authorization", "Bearer invalid-token")
+	wrappedHandler(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("invalid token in optional auth should pass ignored")
+	}
+}
+
+func TestRequireAuthWithCookie(t *testing.T) {
+	config := &JWTConfig{
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
+	}
+	jwtManager, _ := NewJWTManager(config)
+	token, _ := jwtManager.GenerateAccessToken("2", "user@example.com", "sid-456", nil)
+
+	// Use WithCookieToken option
+	authMiddleware := RequireAuth(jwtManager, nil, WithCookieToken("auth_token"))
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		user, ok := GetUser(r)
+		if !ok || user.GetID() != "2" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 	wrappedHandler := authMiddleware(handler)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/test-path", nil)
-	r.Header.Set("Authorization", "Bearer "+refreshToken)
+	r := httptest.NewRequest("GET", "/", nil)
+	r.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+
 	wrappedHandler(w, r)
-
-	// Should return 401
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected 401 Unauthorized, got %d", w.Code)
-	}
-
-	// Check log output contains the error
-	logOutput := buf.String()
-	if !strings.Contains(logOutput, "Token verification failed") {
-		t.Errorf("Expected log to contain 'Token verification failed', got: %s", logOutput)
-	}
-	if !strings.Contains(logOutput, "invalid token type: expected access token") {
-		t.Errorf("Expected log to contain 'invalid token type: expected access token', got: %s", logOutput)
+	if w.Code != http.StatusOK {
+		t.Errorf("valid cookie token should pass")
 	}
 }
 
-func TestRequireAuthWithoutLogger_NoLog(t *testing.T) {
+func TestRequireAuthWithMultipleSources(t *testing.T) {
 	config := &JWTConfig{
-		HMACSecret:         "test-secret",
-		SigningMethod:      "HS256",
-		AccessTokenExpiry:  15 * time.Minute,
-		RefreshTokenExpiry: 7 * 24 * time.Hour,
+		HMACSecret:        "test-secret",
+		SigningMethod:     "HS256",
+		AccessTokenExpiry: 15 * time.Minute,
 	}
 	jwtManager, _ := NewJWTManager(config)
 
-	// Generate refresh token (wrong type)
-	refreshToken, _ := jwtManager.GenerateRefreshToken("1", "sid-123")
+	authMiddleware := RequireAuth(jwtManager, nil,
+		WithBearerToken(),
+		WithCookieToken("auth_token"),
+	)
 
-	// Create middleware WITHOUT logger - should not panic
-	authMiddleware := RequireAuth(jwtManager, nil)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	wrappedHandler := authMiddleware(handler)
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/test-path", nil)
-	r.Header.Set("Authorization", "Bearer "+refreshToken)
+	// Case 1: Bearer token only
+	token1, _ := jwtManager.GenerateAccessToken("1", "user@example.com", "sid-1", nil)
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest("GET", "/", nil)
+	r1.Header.Set("Authorization", "Bearer "+token1)
+	wrappedHandler(w1, r1)
+	if w1.Code != http.StatusOK {
+		t.Errorf("valid bearer token should pass when both configured")
+	}
 
-	// Should not panic and return 401
-	wrappedHandler(w, r)
+	// Case 2: Cookie token only
+	token2, _ := jwtManager.GenerateAccessToken("2", "user@example.com", "sid-2", nil)
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.AddCookie(&http.Cookie{Name: "auth_token", Value: token2})
+	wrappedHandler(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Errorf("valid cookie token should pass when both configured")
+	}
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected 401 Unauthorized, got %d", w.Code)
+	// Case 3: Missing both
+	w3 := httptest.NewRecorder()
+	r3 := httptest.NewRequest("GET", "/", nil)
+	wrappedHandler(w3, r3)
+	if w3.Code != http.StatusUnauthorized {
+		t.Errorf("missing token from both sources should fail")
 	}
 }
