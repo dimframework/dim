@@ -51,7 +51,7 @@ func main() {
 
     // 2. Daftar route sederhana
     router.Get("/hello", func(w http.ResponseWriter, r *http.Request) {
-        dim.Response(w).Ok(dim.Map{
+        dim.OK(w, map[string]any{
             "pesan": "Halo dari dim!",
         })
     })
@@ -172,7 +172,7 @@ func main() {
 
     // 3. Public Routes
     router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-        dim.Response(w).Ok(dim.Map{
+        dim.OK(w, map[string]any{
             "app": "Dim API",
             "version": "1.0.0",
         })
