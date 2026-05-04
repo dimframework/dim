@@ -6,6 +6,7 @@ Pelajari cara mengimplementasikan autentikasi JWT yang aman dan standar.
 
 - [Konsep JWT](#konsep-jwt)
 - [Konfigurasi](#konfigurasi)
+  - [Algoritma yang Didukung](#algoritma-yang-didukung)
 - [User Registration](#user-registration)
 - [User Login](#user-login)
 - [Melindungi Route](#melindungi-route)
@@ -32,15 +33,55 @@ Fitur autentikasi memerlukan tabel `users` dan `refresh_tokens`. Anda dapat meng
 dim.RunMigrations(db, append(dim.GetUserMigrations(), dim.GetTokenMigrations()...))
 ```
 
+### Algoritma yang Didukung
+
+| Family | Algoritma | Jenis | Keterangan |
+|--------|-----------|-------|-----------|
+| HMAC | `HS256`, `HS384`, `HS512` | Symmetric | Satu secret untuk sign & verify. Cocok untuk single-service. |
+| RSA | `RS256`, `RS384`, `RS512` | Asymmetric | Private key untuk sign, public key untuk verify. Cocok untuk multi-service. |
+| ECDSA | `ES256`, `ES384`, `ES512` | Asymmetric | Seperti RSA tapi key lebih kecil dengan keamanan setara. |
+
 ### Environment Variables
 
-Pastikan variabel berikut ada di `.env` Anda:
+**HMAC (default, paling sederhana):**
 
 ```bash
-JWT_SECRET=rahasia-sangat-panjang-dan-aman-minimal-32-karakter
 JWT_SIGNING_METHOD=HS256
+JWT_SECRET=rahasia-sangat-panjang-dan-aman-minimal-32-karakter
 JWT_ACCESS_TOKEN_EXPIRY=15m
 JWT_REFRESH_TOKEN_EXPIRY=168h
+```
+
+**RSA / ECDSA (asymmetric):**
+
+```bash
+JWT_SIGNING_METHOD=RS256   # atau ES256
+JWT_ACCESS_TOKEN_EXPIRY=15m
+JWT_REFRESH_TOKEN_EXPIRY=168h
+
+# Pilih salah satu format untuk JWT_PRIVATE_KEY:
+JWT_PRIVATE_KEY=/etc/secrets/private.pem          # file path
+JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0EgUFJJVkFURQ== # base64-encoded PEM (direkomendasikan)
+
+# Untuk key rotation — JSON map kid -> public key (file path / base64 PEM)
+# JWT_PUBLIC_KEYS={"old-key-id": "LS0tLS1CRUdJTiBQVUJMSUM="}
+```
+
+> **Mengapa base64?** Raw PEM mengandung newline yang bisa bermasalah di Docker env, Kubernetes Secret, dan CI/CD. Encode dulu dengan `base64 -w 0 private.pem` (Linux) atau `base64 -i private.pem` (macOS).
+
+**Generate keypair RSA/ECDSA:**
+
+```bash
+# RSA 2048-bit
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
+
+# ECDSA P-256 (lebih kecil, setara keamanan RSA-3072)
+openssl ecparam -name prime256v1 -genkey -noout -out private.pem
+openssl ec -in private.pem -pubout -out public.pem
+
+# Encode ke base64 untuk .env
+base64 -w 0 private.pem
 ```
 
 ### Inisialisasi JWT Manager
