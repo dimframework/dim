@@ -1,6 +1,7 @@
 package dim
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -261,24 +262,30 @@ func loadJWTConfig() (JWTConfig, error) {
 	}, nil
 }
 
-// resolveKeyContent checks if the value is a file path and reads it,
-// otherwise returns the value as is (assuming it's PEM content).
+// resolveKeyContent resolves a key value from PEM string, base64-encoded PEM, or file path.
 func resolveKeyContent(val string) string {
 	if val == "" {
 		return ""
 	}
+
 	// Check if it's already a PEM string (starts with -----BEGIN)
 	if strings.HasPrefix(strings.TrimSpace(val), "-----BEGIN") {
 		return val
 	}
 
-	// Try to read as file
+	// Try to decode as base64-encoded PEM (useful for env vars that don't support newlines)
+	if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
+		if strings.HasPrefix(strings.TrimSpace(string(decoded)), "-----BEGIN") {
+			return string(decoded)
+		}
+	}
+
+	// Try to read as file path
 	b, err := os.ReadFile(val)
 	if err == nil {
 		return string(b)
 	}
 
-	// If failed to read file, assume it's the content (or invalid path)
 	return val
 }
 
