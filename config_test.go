@@ -1,6 +1,7 @@
 package dim
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -571,5 +572,51 @@ func TestLoadJWTConfig_WithPublicKeyFile(t *testing.T) {
 		t.Error("Expected 'default' public key to be present")
 	} else if val != expectedContent {
 		t.Errorf("Expected PublicKey to be loaded from file, got: %s", val)
+	}
+}
+
+func TestResolveKeyContent_Base64EncodedPEM(t *testing.T) {
+	pemContent := "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj\n-----END PRIVATE KEY-----"
+	encoded := base64.StdEncoding.EncodeToString([]byte(pemContent))
+
+	result := resolveKeyContent(encoded)
+	if result != pemContent {
+		t.Errorf("Expected decoded PEM, got: %s", result)
+	}
+}
+
+func TestResolveKeyContent_Base64PublicKeyViaEnv(t *testing.T) {
+	pemContent := "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----"
+	encoded := base64.StdEncoding.EncodeToString([]byte(pemContent))
+
+	envVal := `{"default": "` + encoded + `"}`
+	os.Setenv("JWT_PUBLIC_KEYS", envVal)
+	defer os.Unsetenv("JWT_PUBLIC_KEYS")
+
+	cfg, err := loadJWTConfig()
+	if err != nil {
+		t.Fatalf("loadJWTConfig() failed: %v", err)
+	}
+
+	if val, ok := cfg.PublicKeys["default"]; !ok {
+		t.Error("Expected 'default' public key to be present")
+	} else if val != pemContent {
+		t.Errorf("Expected decoded PEM content, got: %s", val)
+	}
+}
+
+func TestResolveKeyContent_RawPEMUnchanged(t *testing.T) {
+	pemContent := "-----BEGIN EC PRIVATE KEY-----\nSOMECONTENT\n-----END EC PRIVATE KEY-----"
+
+	result := resolveKeyContent(pemContent)
+	if result != pemContent {
+		t.Errorf("Expected raw PEM unchanged, got: %s", result)
+	}
+}
+
+func TestResolveKeyContent_EmptyString(t *testing.T) {
+	result := resolveKeyContent("")
+	if result != "" {
+		t.Errorf("Expected empty string, got: %s", result)
 	}
 }

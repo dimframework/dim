@@ -225,8 +225,11 @@ JWT_SIGNING_METHOD=HS256
 # JWT signing secret (required for HS256)
 JWT_SECRET=your-super-secret-key-change-in-production
 
-# Private key file path or content (required for RS256/ES256)
+# Private key file path, raw PEM, atau base64-encoded PEM (required for RS256/ES256)
 JWT_PRIVATE_KEY=/path/to/private.pem
+
+# Public keys untuk key rotation (JSON map kid->value, value bisa file path/raw PEM/base64 PEM)
+# JWT_PUBLIC_KEYS={"old-key": "/path/to/old-public.pem"}
 
 # Access token expiry (default: 15m)
 JWT_ACCESS_TOKEN_EXPIRY=15m
@@ -247,6 +250,31 @@ type JWTConfig struct {
     PublicKeys         map[string]string
     JWKSURL            string
 }
+```
+
+### Format Nilai `JWT_PRIVATE_KEY`
+
+`JWT_PRIVATE_KEY` (dan nilai di dalam `JWT_PUBLIC_KEYS`) mendukung tiga format:
+
+| Format | Contoh Nilai | Keterangan |
+|--------|-------------|-----------|
+| File path | `/etc/secrets/private.pem` | Dibaca dari filesystem |
+| Raw PEM | `-----BEGIN EC PRIVATE KEY-----\n...` | PEM langsung di env |
+| Base64 PEM | `LS0tLS1CRUdJTi...` | PEM di-encode base64, **direkomendasikan untuk Docker/K8s** |
+
+**Mengapa base64?** Raw PEM mengandung newline yang bisa bermasalah di beberapa platform (Docker env, Kubernetes Secret, CI/CD). Base64 mengubah PEM menjadi single-line string yang aman.
+
+```bash
+# Generate base64 dari file PEM
+base64 -w 0 private.pem   # Linux
+base64 -i private.pem     # macOS
+
+# Set di .env
+JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0t...
+
+# Set di Kubernetes Secret
+kubectl create secret generic jwt-keys \
+  --from-literal=JWT_PRIVATE_KEY=$(base64 -w 0 private.pem)
 ```
 
 ### Token Expiry Guide
