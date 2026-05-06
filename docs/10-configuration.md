@@ -322,6 +322,57 @@ JWT_SECRET=abc123def456...
 
 ---
 
+## Branca Configuration
+
+Branca adalah token provider alternatif yang mengenkripsi payload menggunakan XChaCha20-Poly1305. Payload tidak bisa dibaca oleh siapapun tanpa key yang benar.
+
+### Environment Variables
+
+```bash
+# Symmetric key 32-byte (hex, 64 karakter) — WAJIB jika menggunakan Branca
+BRANCA_KEY=a3f1c2d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2
+
+# Access token expiry (default: 15m)
+BRANCA_ACCESS_TOKEN_EXPIRY=15m
+
+# Refresh token expiry (default: 168h/7d)
+BRANCA_REFRESH_TOKEN_EXPIRY=168h
+```
+
+### BrancaConfig Struct
+
+```go
+type BrancaConfig struct {
+    Key                string        // 32-byte key (hex atau base64)
+    AccessTokenExpiry  time.Duration
+    RefreshTokenExpiry time.Duration
+}
+```
+
+### Format Nilai `BRANCA_KEY`
+
+| Format | Contoh | Keterangan |
+|--------|--------|-----------|
+| Hex | `a3f1c2d4...` (64 chars) | **Direkomendasikan** — mudah di-generate dan dibaca |
+| Base64 | `o/HC1OW2...` (44 chars) | Kompatibel dengan secret manager yang output base64 |
+| Raw string | `32charstring...` (32 chars) | Hanya jika tepat 32 karakter |
+
+### Generate Key
+
+```bash
+# Generate hex key (direkomendasikan)
+openssl rand -hex 32
+
+# Set di .env
+BRANCA_KEY=hasil-dari-openssl-di-atas
+
+# Set di Kubernetes Secret
+kubectl create secret generic branca-key \
+  --from-literal=BRANCA_KEY=$(openssl rand -hex 32)
+```
+
+---
+
 ## CORS Configuration
 
 ### Environment Variables
