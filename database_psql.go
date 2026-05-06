@@ -115,6 +115,57 @@ func (db *PostgresDatabase) AddHook(hook QueryHook) {
 	db.hookManager.Add(hook)
 }
 
+// NewMigrationDatabase membuat koneksi database khusus untuk menjalankan migrations.
+// Menggunakan nilai dari DB_MIGRATION_* env vars, dengan fallback ke nilai Write connection
+// untuk field yang tidak di-override.
+//
+// Ini berguna ketika migration memerlukan kredensial berbeda (misal superuser) atau
+// host berbeda dari koneksi aplikasi utama.
+//
+// Example:
+//
+//	migrationDB, err := dim.NewMigrationDatabase(cfg.Database)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	console.WithMigrationDB(migrationDB)
+func NewMigrationDatabase(config DatabaseConfig) (*PostgresDatabase, error) {
+	host := config.MigrationHost
+	if host == "" {
+		host = config.WriteHost
+	}
+
+	port := config.MigrationPort
+	if port == 0 {
+		port = config.Port
+	}
+
+	username := config.MigrationUsername
+	if username == "" {
+		username = config.Username
+	}
+
+	password := config.MigrationPassword
+	if password == "" {
+		password = config.Password
+	}
+
+	hm := &hookManager{hooks: make([]QueryHook, 0)}
+
+	connString := formatConnectionString(host, port, config.Database, username, password, config.SSLMode)
+	pool, err := createConnectionPool(connString, config.MaxConns, config.RuntimeParams, config.QueryExecMode, hm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migration connection pool: %w", err)
+	}
+
+	return &PostgresDatabase{
+		writePool:   pool,
+		readPools:   []*pgxpool.Pool{pool},
+		readIndex:   atomic.Uint32{},
+		hookManager: hm,
+	}, nil
+}
+
 // Exec mengeksekusi write query (INSERT, UPDATE, DELETE) ke write connection pool.
 // Semua operasi write selalu dikirim ke write pool untuk consistency.
 // Gunakan sticky mode jika perlu subsequent reads ke write connection yang sama.

@@ -34,8 +34,13 @@ type CommandContext struct {
 	// Args adalah arguments yang tidak termasuk flags (positional arguments)
 	Args []string
 
-	// DB adalah database instance
+	// DB adalah database instance untuk operasi aplikasi (read/write)
 	DB Database
+
+	// MigrationDB adalah koneksi database khusus untuk menjalankan migrations.
+	// Jika nil, migration akan menggunakan DB sebagai fallback.
+	// Set via Console.WithMigrationDB() sebelum Run().
+	MigrationDB Database
 
 	// Router adalah router instance
 	Router *Router
@@ -55,12 +60,13 @@ type CommandContext struct {
 // Console adalah registry dan executor untuk CLI commands.
 // Console mengelola semua registered commands dan menangani parsing/eksekusi.
 type Console struct {
-	commands map[string]Command
-	db       Database
-	router   *Router
-	config   *Config
-	out      io.Writer // Output writer (default: os.Stdout)
-	err      io.Writer // Error writer (default: os.Stderr)
+	commands    map[string]Command
+	db          Database
+	migrationDB Database // optional, fallback ke db jika nil
+	router      *Router
+	config      *Config
+	out         io.Writer // Output writer (default: os.Stdout)
+	err         io.Writer // Error writer (default: os.Stderr)
 }
 
 // NewConsole membuat instance Console baru dengan dependencies yang diperlukan.
@@ -98,6 +104,24 @@ func (c *Console) SetOutput(out, err io.Writer) {
 	if err != nil {
 		c.err = err
 	}
+}
+
+// WithMigrationDB mengatur koneksi database khusus untuk perintah migrate.
+// Jika tidak di-set, perintah migrate akan menggunakan koneksi DB utama sebagai fallback.
+//
+// Gunakan ini ketika migration memerlukan kredensial berbeda (misal superuser)
+// atau host berbeda dari koneksi aplikasi.
+//
+// Example:
+//
+//	migrationDB, _ := dim.NewMigrationDatabase(cfg.Database)
+//	console := dim.NewConsole(db, router, cfg)
+//	console.WithMigrationDB(migrationDB)
+//	console.RegisterBuiltInCommands()
+//	console.Run(os.Args[1:])
+func (c *Console) WithMigrationDB(db Database) *Console {
+	c.migrationDB = db
+	return c
 }
 
 // Register mendaftarkan custom command ke console.
@@ -171,12 +195,13 @@ func (c *Console) Run(args []string) error {
 
 	// Prepare context
 	ctx := &CommandContext{
-		Args:   cmdArgs,
-		DB:     c.db,
-		Router: c.router,
-		Config: c.config,
-		Out:    c.out,
-		Err:    c.err,
+		Args:        cmdArgs,
+		DB:          c.db,
+		MigrationDB: c.migrationDB,
+		Router:      c.router,
+		Config:      c.config,
+		Out:         c.out,
+		Err:         c.err,
 	}
 
 	// Check if command implements FlaggedCommand

@@ -43,6 +43,13 @@ func main() {
     // 2. Inisialisasi Console
     console := dim.NewConsole(db, router, config)
 
+    // (Opsional) Gunakan koneksi terpisah untuk migration
+    // Berguna jika migration memerlukan superuser atau host berbeda
+    if config.Database.MigrationHost != "" {
+        migrationDB, _ := dim.NewMigrationDatabase(config.Database)
+        console.WithMigrationDB(migrationDB)
+    }
+
     // 3. Register Built-in Commands
     console.RegisterBuiltInCommands()
 
@@ -103,13 +110,15 @@ go run main.go serve [flags]
 ### `migrate`
 Menjalankan semua pending database migrations. Command ini akan mengeksekusi file migrasi yang belum pernah dijalankan sebelumnya.
 
+Jika `console.WithMigrationDB()` di-set, perintah ini menggunakan koneksi migration khusus. Jika tidak, fallback ke koneksi Write utama.
+
 **Usage:**
 ```bash
 go run main.go migrate [flags]
 ```
 
 **Flags:**
-- `-v`: Verbose mode, menampilkan detail setiap step migrasi.
+- `-v`: Verbose mode, menampilkan detail setiap step migrasi dan koneksi yang digunakan.
 
 ---
 
@@ -256,7 +265,8 @@ func main() {
 
 ## Tips
 
-- Gunakan `ctx.DB` di dalam `Execute` untuk mengakses database.
+- Gunakan `ctx.DB` di dalam `Execute` untuk mengakses database aplikasi.
+- Gunakan `ctx.MigrationDB` jika command Anda perlu koneksi migration (bisa `nil` — selalu cek dulu).
 - Gunakan `ctx.Config` untuk membaca konfigurasi environment.
 - Nama command sebaiknya menggunakan format `verb` atau `noun:verb` (contoh: `cache:clear`, `user:create`).
 
