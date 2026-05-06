@@ -182,3 +182,45 @@ Jika Anda ingin **mengganti** skema tabel-tabel ini (misalnya menggunakan `BIGSE
     ```
 
 Dengan cara ini, saat Anda menjalankan `go run . migrate`, framework hanya akan menjalankan migrasi kustom Anda dan mengabaikan versi bawaan.
+
+---
+
+## Dedicated Migration Database Connection
+
+Di beberapa environment, migration perlu dijalankan dengan kredensial atau host berbeda dari koneksi aplikasi — misalnya menggunakan superuser PostgreSQL agar bisa membuat extension atau mengubah schema.
+
+Framework mendukung hal ini melalui `DB_MIGRATION_*` env vars dan `NewMigrationDatabase`.
+
+### Environment Variables
+
+```bash
+# Opsional — jika tidak di-set, fallback ke nilai Write connection
+DB_MIGRATION_HOST=migration.db.internal   # fallback: DB_WRITE_HOST
+DB_MIGRATION_PORT=5432                    # fallback: DB_PORT
+DB_MIGRATION_USER=migrate_superuser       # fallback: DB_USER
+DB_MIGRATION_PASSWORD=superuser_password  # fallback: DB_PASSWORD
+```
+
+### Setup di main.go
+
+```go
+cfg, _ := dim.LoadConfig()
+
+// Koneksi aplikasi (read/write biasa)
+db, _ := dim.NewPostgresDatabase(cfg.Database)
+
+// Koneksi migration — dibuat hanya jika MigrationHost di-set
+var migrationDB dim.Database
+if cfg.Database.MigrationHost != "" {
+    migrationDB, _ = dim.NewMigrationDatabase(cfg.Database)
+}
+
+console := dim.NewConsole(db, router, cfg)
+if migrationDB != nil {
+    console.WithMigrationDB(migrationDB)
+}
+console.RegisterBuiltInCommands()
+console.Run(os.Args[1:])
+```
+
+Jika `DB_MIGRATION_HOST` tidak di-set, semua perintah migrate tetap berjalan normal menggunakan koneksi Write — tidak ada perubahan behavior untuk setup yang sudah ada.

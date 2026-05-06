@@ -163,6 +163,12 @@ DB_SSL_MODE=disable
 
 # Max connections per pool (default: 25)
 DB_MAX_CONNS=25
+
+# Migration-specific connection (opsional — fallback ke Write connection jika tidak di-set)
+DB_MIGRATION_HOST=migration.db.internal
+DB_MIGRATION_PORT=5432
+DB_MIGRATION_USER=migrate_superuser
+DB_MIGRATION_PASSWORD=superuser_password
 ```
 
 ### Database Config Struct
@@ -179,6 +185,12 @@ type DatabaseConfig struct {
     MaxConns      int
     RuntimeParams map[string]string // Custom runtime parameters (e.g., search_path)
     QueryExecMode string            // e.g., "simple_protocol"
+
+    // Migration connection overrides — fallback ke Write jika kosong
+    MigrationHost     string
+    MigrationPort     int
+    MigrationUsername string
+    MigrationPassword string
 }
 ```
 
