@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Branca Token Provider**: Added `BrancaManager` as an alternative to `JWTManager`. Branca tokens encrypt the payload using XChaCha20-Poly1305 — claims are unreadable by the client, suitable for sensitive payloads or internal services.
+- **`TokenManager` Interface**: Introduced `TokenManager` interface and `TokenClaims` type alias to abstract token operations. Both `JWTManager` and `BrancaManager` implement this interface, enabling provider switching without changing application code.
+- **`NewAuthServiceWithManager`**: New constructor for `AuthService` that accepts any `TokenManager` implementation, enabling Branca (or future providers) to be used with `AuthService`.
+- **`BrancaConfig`**: New config struct with `BRANCA_KEY`, `BRANCA_ACCESS_TOKEN_EXPIRY`, and `BRANCA_REFRESH_TOKEN_EXPIRY` environment variables.
+- **Base64 PEM support for JWT keys**: `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEYS` now accept base64-encoded PEM content in addition to file paths and raw PEM strings — recommended for Docker/Kubernetes environments where newlines in env vars are problematic.
+
+### Changed
+- **`RequireAuth` and `OptionalAuth`**: Parameter type changed from `*JWTManager` to `TokenManager` interface. Fully backward compatible — existing code passing `*JWTManager` continues to work unchanged.
+- **`JWTManager.VerifyToken`**: Return type changed from `jwt.MapClaims` to `TokenClaims` (a type alias for `map[string]interface{}`). Fully backward compatible for map access patterns.
+
+---
+
 ## [v0.5.0] - 2026-02-10
 
 ### Added
