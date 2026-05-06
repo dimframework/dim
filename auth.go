@@ -37,13 +37,14 @@ type AuthService struct {
 	userStore      AuthUserStore
 	tokenStore     TokenStore
 	blocklist      TokenBlocklist
-	jwtManager     *JWTManager
+	tokenManager   TokenManager
 	pwValidator    *PasswordValidator
 	claimsProvider ClaimsProvider
 	logger         *Logger
 }
 
-// NewAuthService membuat instance AuthService baru.
+// NewAuthService membuat instance AuthService baru menggunakan JWTConfig.
+// Untuk menggunakan token provider lain (misal Branca), gunakan NewAuthServiceWithManager.
 func NewAuthService(
 	userStore AuthUserStore,
 	tokenStore TokenStore,
@@ -54,12 +55,28 @@ func NewAuthService(
 	if err != nil {
 		return nil, fmt.Errorf("failed to init jwt manager: %w", err)
 	}
+	return NewAuthServiceWithManager(userStore, tokenStore, blocklist, jwtManager)
+}
+
+// NewAuthServiceWithManager membuat instance AuthService baru menggunakan TokenManager yang sudah diinisialisasi.
+// Gunakan ini untuk memilih token provider secara eksplisit (JWT, Branca, dll).
+//
+// Example:
+//
+//	brancaManager, _ := dim.NewBrancaManager(&cfg.Branca)
+//	authService, _ := dim.NewAuthServiceWithManager(userStore, tokenStore, blocklist, brancaManager)
+func NewAuthServiceWithManager(
+	userStore AuthUserStore,
+	tokenStore TokenStore,
+	blocklist TokenBlocklist,
+	manager TokenManager,
+) (*AuthService, error) {
 	return &AuthService{
-		userStore:   userStore,
-		tokenStore:  tokenStore,
-		blocklist:   blocklist,
-		jwtManager:  jwtManager,
-		pwValidator: NewPasswordValidator(),
+		userStore:    userStore,
+		tokenStore:   tokenStore,
+		blocklist:    blocklist,
+		tokenManager: manager,
+		pwValidator:  NewPasswordValidator(),
 	}, nil
 }
 
@@ -132,12 +149,12 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	sessionID := NewUuid().String()
 
 	// Generate tokens
-	accessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
+	accessToken, err := s.tokenManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat access token", 500)
 	}
 
-	refreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID(), sessionID)
+	refreshToken, err := s.tokenManager.GenerateRefreshToken(user.GetID(), sessionID)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
@@ -170,7 +187,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 //   - error: error jika token tidak valid, kadaluarsa, atau sudah dibatalkan
 func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) (string, string, error) {
 	// Verify refresh token
-	userID, sessionID, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
+	userID, sessionID, err := s.tokenManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
 		// Log internal error jika logger tersedia
 		if s.logger != nil {
@@ -212,13 +229,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenStr string) 
 	}
 
 	// Generate new access token
-	newAccessToken, err := s.jwtManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
+	newAccessToken, err := s.tokenManager.GenerateAccessToken(user.GetID(), user.GetEmail(), sessionID, extraClaims)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat access token", 500)
 	}
 
 	// Generate new refresh token
-	newRefreshToken, err := s.jwtManager.GenerateRefreshToken(user.GetID(), sessionID)
+	newRefreshToken, err := s.tokenManager.GenerateRefreshToken(user.GetID(), sessionID)
 	if err != nil {
 		return "", "", NewAppError("Gagal membuat refresh token", 500)
 	}
@@ -358,7 +375,7 @@ func (s *AuthService) Logout(ctx context.Context, refreshTokenStr string) error 
 
 	// 1. Dapatkan Session ID dari Refresh Token
 	// Kita abaikan userID karena tidak digunakan disini
-	_, sid, err := s.jwtManager.VerifyRefreshToken(refreshTokenStr)
+	_, sid, err := s.tokenManager.VerifyRefreshToken(refreshTokenStr)
 	if err != nil {
 		// Log internal error jika logger tersedia
 		if s.logger != nil {

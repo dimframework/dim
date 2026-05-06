@@ -221,9 +221,9 @@ func (m *JWTManager) verifyKeyFunc(token *jwt.Token) (interface{}, error) {
 //   - tokenString: raw JWT string yang diterima dari client
 //
 // Returns:
-//   - jwt.MapClaims: klaim-klaim yang ada di dalam token jika valid
+//   - TokenClaims: klaim-klaim yang ada di dalam token jika valid
 //   - error: error jika signature tidak valid, token kedaluwarsa, atau format salah
-func (m *JWTManager) VerifyToken(tokenString string) (jwt.MapClaims, error) {
+func (m *JWTManager) VerifyToken(tokenString string) (TokenClaims, error) {
 	claims := jwt.MapClaims{}
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, m.verifyKeyFunc)

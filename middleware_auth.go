@@ -118,13 +118,13 @@ func AllowBearerToken() MiddlewareFunc {
 	}
 }
 
-// RequireAuth adalah middleware yang aman dan direkomendasikan untuk mewajibkan dan memverifikasi token JWT yang valid.
-// Middleware ini menggunakan JWTManager untuk memvalidasi token dan menempatkan info pengguna ke dalam konteks.
+// RequireAuth adalah middleware yang aman dan direkomendasikan untuk mewajibkan dan memverifikasi token yang valid.
+// Middleware ini menggunakan TokenManager untuk memvalidasi token dan menempatkan info pengguna ke dalam konteks.
 // Juga dapat mengecek TokenBlocklist jika disediakan (opsional).
 // Mengembalikan 401 Unauthorized jika token tidak ada, tidak valid, atau kedaluwarsa.
 //
 // Parameters:
-//   - jwtManager: *JWTManager untuk verifikasi token.
+//   - tokenManager: TokenManager untuk verifikasi token (JWTManager atau BrancaManager).
 //   - blocklist: TokenBlocklist interface (opsional, pass nil jika tidak digunakan).
 //   - opts: variadic AuthMiddlewareOption untuk konfigurasi tambahan (opsional).
 //
@@ -134,10 +134,11 @@ func AllowBearerToken() MiddlewareFunc {
 // Example:
 //
 //	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist))
+//	router.Get("/protected", handler, RequireAuth(brancaManager, blocklist))
 //	// Dengan logger untuk internal error logging:
 //	router.Get("/protected", handler, RequireAuth(jwtManager, blocklist, WithAuthLogger(logger)))
 //	// Di dalam handler, gunakan GetUser(req) untuk mendapatkan pengguna yang terautentikasi.
-func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthMiddlewareOption) MiddlewareFunc {
+func RequireAuth(tokenManager TokenManager, blocklist TokenBlocklist, opts ...AuthMiddlewareOption) MiddlewareFunc {
 	// Apply options
 	cfg := &authMiddlewareConfig{}
 	for _, opt := range opts {
@@ -155,7 +156,7 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthM
 			}
 
 			// Verify token
-			claims, err := jwtManager.VerifyToken(token)
+			claims, err := tokenManager.VerifyToken(token)
 			if err != nil {
 				// Log internal error jika logger tersedia
 				if cfg.logger != nil {
@@ -240,7 +241,7 @@ func RequireAuth(jwtManager *JWTManager, blocklist TokenBlocklist, opts ...AuthM
 // RequiresAuth check logic implemented above.
 
 // OptionalAuth is updated to support options too
-func OptionalAuth(jwtManager *JWTManager, opts ...AuthMiddlewareOption) MiddlewareFunc {
+func OptionalAuth(tokenManager TokenManager, opts ...AuthMiddlewareOption) MiddlewareFunc {
 	// Apply options
 	cfg := &authMiddlewareConfig{}
 	for _, opt := range opts {
@@ -252,7 +253,7 @@ func OptionalAuth(jwtManager *JWTManager, opts ...AuthMiddlewareOption) Middlewa
 			token, ok := getConfiguredToken(r, cfg)
 			if ok {
 				// Try to verify token
-				if claims, err := jwtManager.VerifyToken(token); err == nil {
+				if claims, err := tokenManager.VerifyToken(token); err == nil {
 					// Token is valid, set user in context
 
 					// Extract UserID from claims
