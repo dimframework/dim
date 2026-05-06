@@ -62,6 +62,13 @@ type DatabaseConfig struct {
 	SSLMode       string            // SSL mode: "disable", "require", "prefer", "allow", "verify-ca", "verify-full" (default: "disable")
 	RuntimeParams map[string]string // Custom runtime parameters (search_path, standard_conforming_strings, etc)
 	QueryExecMode string            // Query execution mode: "simple" or "" (default)
+
+	// Migration-specific connection overrides.
+	// If empty, the corresponding Write connection value is used as fallback.
+	MigrationHost     string // DB_MIGRATION_HOST (fallback: WriteHost)
+	MigrationPort     int    // DB_MIGRATION_PORT (fallback: Port)
+	MigrationUsername string // DB_MIGRATION_USER (fallback: Username)
+	MigrationPassword string // DB_MIGRATION_PASSWORD (fallback: Password)
 }
 
 // EmailConfig holds email configuration and branding settings.
@@ -319,6 +326,11 @@ func loadDatabaseConfig() (DatabaseConfig, error) {
 		return DatabaseConfig{}, fmt.Errorf("invalid DB_MAX_CONNS: %w", err)
 	}
 
+	migrationPort, err := ParseEnvInt(GetEnvOrDefault("DB_MIGRATION_PORT", "0"))
+	if err != nil {
+		return DatabaseConfig{}, fmt.Errorf("invalid DB_MIGRATION_PORT: %w", err)
+	}
+
 	return DatabaseConfig{
 		Driver:        driver,
 		WriteHost:     GetEnv("DB_WRITE_HOST"),
@@ -331,6 +343,10 @@ func loadDatabaseConfig() (DatabaseConfig, error) {
 		SSLMode:       GetEnvOrDefault("DB_SSL_MODE", "disable"),
 		RuntimeParams: make(map[string]string),
 		QueryExecMode: "",
+		MigrationHost:     GetEnv("DB_MIGRATION_HOST"),
+		MigrationPort:     migrationPort,
+		MigrationUsername: GetEnv("DB_MIGRATION_USER"),
+		MigrationPassword: GetEnv("DB_MIGRATION_PASSWORD"),
 	}, nil
 }
 

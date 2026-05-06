@@ -1,6 +1,7 @@
 package dim
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -224,6 +225,75 @@ func TestDecodeBrancaKey_Empty(t *testing.T) {
 	_, err := decodeBrancaKey("")
 	if err == nil {
 		t.Error("expected error for empty key")
+	}
+}
+
+func TestDecodeBrancaKey_RawBytes32(t *testing.T) {
+	raw := "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456" // exactly 32 chars, not valid hex or base64
+	key, err := decodeBrancaKey(raw)
+	if err != nil {
+		t.Fatalf("unexpected error for raw 32-char key: %v", err)
+	}
+	if len(key) != 32 {
+		t.Errorf("key length = %d, want 32", len(key))
+	}
+	if string(key) != raw {
+		t.Errorf("key bytes = %q, want %q", key, raw)
+	}
+}
+
+func TestDecodeBrancaKey_Base64Standard(t *testing.T) {
+	rawKey := make([]byte, 32)
+	for i := range rawKey {
+		rawKey[i] = byte(i + 1)
+	}
+	encoded := base64.StdEncoding.EncodeToString(rawKey)
+	key, err := decodeBrancaKey(encoded)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(key) != 32 {
+		t.Errorf("key length = %d, want 32", len(key))
+	}
+}
+
+func TestDecodeBrancaKey_Base64RawURL(t *testing.T) {
+	rawKey := make([]byte, 32)
+	for i := range rawKey {
+		rawKey[i] = byte(i + 10)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(rawKey)
+	key, err := decodeBrancaKey(encoded)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(key) != 32 {
+		t.Errorf("key length = %d, want 32", len(key))
+	}
+}
+
+func TestBrancaBase62_LeadingZeroRoundtrip(t *testing.T) {
+	data := []byte{0x00, 0x00, 0xBA, 0x01, 0x02, 0x03}
+	encoded := brancaBase62Encode(data)
+	decoded, err := brancaBase62Decode(encoded)
+	if err != nil {
+		t.Fatalf("brancaBase62Decode failed: %v", err)
+	}
+	if string(decoded) != string(data) {
+		t.Errorf("roundtrip mismatch: got %x, want %x", decoded, data)
+	}
+}
+
+func TestBrancaManager_ExtraClaimsCannotOverwriteReserved(t *testing.T) {
+	m := testBrancaManager(t)
+
+	reserved := []string{"sub", "exp", "iat", "nbf", "typ", "sid", "jti", "email"}
+	for _, claim := range reserved {
+		extra := map[string]interface{}{claim: "injected"}
+		_, err := m.GenerateAccessToken("user123", "email@example.com", "sid", extra)
+		if err == nil {
+			t.Errorf("expected error when extraClaims overwrites reserved claim %q", claim)
+		}
 	}
 }
 

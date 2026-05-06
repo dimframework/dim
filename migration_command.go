@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// migrationConn returns the migration-specific DB if set, otherwise falls back to the main DB.
+func migrationConn(ctx *CommandContext) Database {
+	if ctx.MigrationDB != nil {
+		return ctx.MigrationDB
+	}
+	return ctx.DB
+}
+
 // ============================================================================
 // MigrateCommand - Run pending migrations
 // ============================================================================
@@ -37,7 +45,12 @@ func (c *MigrateCommand) Execute(ctx *CommandContext) error {
 		return fmt.Errorf("database connection required")
 	}
 
+	db := migrationConn(ctx)
+
 	if c.verbose {
+		if ctx.MigrationDB != nil {
+			fmt.Println("Using dedicated migration database connection...")
+		}
 		fmt.Println("Running migrations in verbose mode...")
 	}
 
@@ -49,7 +62,7 @@ func (c *MigrateCommand) Execute(ctx *CommandContext) error {
 		fmt.Printf("Found %d total migrations\n", len(migrations))
 	}
 
-	if err := RunMigrations(ctx.DB, migrations); err != nil {
+	if err := RunMigrations(db, migrations); err != nil {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
@@ -89,11 +102,13 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 		return fmt.Errorf("steps must be greater than 0")
 	}
 
+	db := migrationConn(ctx)
+
 	fmt.Printf("Rolling back %d migration(s)...\n", c.steps)
 
 	// Get applied migrations
 	query := `SELECT version, name FROM migrations ORDER BY version DESC LIMIT $1`
-	rows, err := ctx.DB.Query(context.Background(), query, c.steps)
+	rows, err := db.Query(context.Background(), query, c.steps)
 	if err != nil {
 		return fmt.Errorf("failed to query migrations: %w", err)
 	}
@@ -156,7 +171,7 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 	// Rollback each migration
 	for _, migration := range migrationsToRollback {
 		fmt.Printf("Rolling back: %s (version %d)\n", migration.Name, migration.Version)
-		if err := RollbackMigration(ctx.DB, migration); err != nil {
+		if err := RollbackMigration(db, migration); err != nil {
 			return fmt.Errorf("rollback failed for %s: %w", migration.Name, err)
 		}
 		fmt.Printf("✓ Rolled back: %s\n", migration.Name)
@@ -322,6 +337,8 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 		return fmt.Errorf("database connection required")
 	}
 
+	db := migrationConn(ctx)
+
 	// Get all framework migrations
 	frameworkMigrations := GetFrameworkMigrations()
 	// Add registered migrations
@@ -330,7 +347,7 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 	// Get applied migrations from database
 	appliedMap := make(map[int64]time.Time)
 	query := `SELECT version, applied_at FROM migrations ORDER BY version`
-	rows, err := ctx.DB.Query(context.Background(), query)
+	rows, err := db.Query(context.Background(), query)
 	if err != nil {
 		// Table might not exist yet
 		fmt.Println("⚠ Migrations table does not exist yet. Run 'migrate' first.")
