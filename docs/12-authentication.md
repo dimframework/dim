@@ -1,12 +1,16 @@
-# Autentikasi & JWT di Framework dim
+# Autentikasi & Token di Framework dim
 
-Pelajari cara mengimplementasikan autentikasi JWT yang aman dan standar.
+Pelajari cara mengimplementasikan autentikasi token yang aman menggunakan JWT atau Branca.
 
 ## Daftar Isi
 
-- [Konsep JWT](#konsep-jwt)
+- [Konsep Token](#konsep-token)
+  - [Memilih Token Provider](#memilih-token-provider)
 - [Konfigurasi](#konfigurasi)
-  - [Algoritma yang Didukung](#algoritma-yang-didukung)
+  - [Algoritma yang Didukung (JWT)](#algoritma-yang-didukung-jwt)
+  - [Konfigurasi JWT](#konfigurasi-jwt)
+  - [Konfigurasi Branca](#konfigurasi-branca)
+- [Inisialisasi Token Manager](#inisialisasi-token-manager)
 - [User Registration](#user-registration)
 - [User Login](#user-login)
 - [Melindungi Route](#melindungi-route)
@@ -16,9 +20,23 @@ Pelajari cara mengimplementasikan autentikasi JWT yang aman dan standar.
 
 ---
 
-## Konsep JWT
+## Konsep Token
 
-JWT (JSON Web Token) digunakan sebagai token *stateless* untuk autentikasi API. Framework `dim` menyediakan `JWTManager` untuk menangani pembuatan (signing) dan verifikasi token dengan dukungan untuk berbagai algoritma (HS256, RS256, ES256).
+Framework `dim` menggunakan interface `TokenManager` sebagai abstraksi untuk semua operasi token — generate, verify, dan cek expiry. Ada dua implementasi bawaan:
+
+- **`JWTManager`** — JSON Web Token yang di-*sign* (payload terbaca client, aman via signature)
+- **`BrancaManager`** — Token Branca yang di-*encrypt* (payload tidak bisa dibaca client sama sekali)
+
+Karena keduanya mengimplementasikan interface yang sama, kode aplikasi tidak perlu berubah saat berpindah provider.
+
+### Memilih Token Provider
+
+| | JWT | Branca |
+|---|---|---|
+| Payload | Terbaca client (base64) | Terenkripsi (XChaCha20-Poly1305) |
+| Kunci | Asymmetric (RS/ES) atau symmetric (HS) | Symmetric 32-byte |
+| Cocok untuk | API publik, multi-service, JWKS | Payload sensitif, internal service |
+| Key rotation | Didukung via `kid` header | Ganti key, token lama otomatis invalid |
 
 ---
 
@@ -33,7 +51,7 @@ Fitur autentikasi memerlukan tabel `users` dan `refresh_tokens`. Anda dapat meng
 dim.RunMigrations(db, append(dim.GetUserMigrations(), dim.GetTokenMigrations()...))
 ```
 
-### Algoritma yang Didukung
+### Algoritma yang Didukung (JWT)
 
 | Family | Algoritma | Jenis | Keterangan |
 |--------|-----------|-------|-----------|
@@ -41,7 +59,7 @@ dim.RunMigrations(db, append(dim.GetUserMigrations(), dim.GetTokenMigrations()..
 | RSA | `RS256`, `RS384`, `RS512` | Asymmetric | Private key untuk sign, public key untuk verify. Cocok untuk multi-service. |
 | ECDSA | `ES256`, `ES384`, `ES512` | Asymmetric | Seperti RSA tapi key lebih kecil dengan keamanan setara. |
 
-### Environment Variables
+### Konfigurasi JWT
 
 **HMAC (default, paling sederhana):**
 
@@ -84,18 +102,55 @@ openssl ec -in private.pem -pubout -out public.pem
 base64 -w 0 private.pem
 ```
 
-### Inisialisasi JWT Manager
+### Konfigurasi Branca
+
+Branca membutuhkan satu symmetric key 32-byte. Key dapat diberikan dalam format hex (64 karakter), base64, atau raw string 32 karakter.
+
+```bash
+# Generate key (hex, direkomendasikan)
+openssl rand -hex 32
+
+# Set di .env
+BRANCA_KEY=a3f1c2d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2
+BRANCA_ACCESS_TOKEN_EXPIRY=15m
+BRANCA_REFRESH_TOKEN_EXPIRY=168h
+```
+
+> **Keamanan:** Berbeda dengan JWT yang hanya men-*sign* payload, Branca mengenkripsi seluruh payload menggunakan XChaCha20-Poly1305. Client tidak bisa membaca isi token sama sekali — cocok untuk menyimpan data yang tidak boleh terekspos.
+
+## Inisialisasi Token Manager
+
+Framework menyediakan `TokenManager` interface sehingga JWT dan Branca bisa dipakai secara bergantian.
+
+**Menggunakan JWT:**
 
 ```go
-// Load config
 cfg, _ := dim.LoadConfig()
 
-// Init Manager
 jwtManager, err := dim.NewJWTManager(&cfg.JWT)
 if err != nil {
-    log.Fatal("Gagal init JWT:", err)
+    log.Fatal("Gagal init JWT manager:", err)
 }
+
+// AuthService via JWT
+authService, err := dim.NewAuthService(userStore, tokenStore, blocklist, &cfg.JWT)
 ```
+
+**Menggunakan Branca:**
+
+```go
+cfg, _ := dim.LoadConfig()
+
+brancaManager, err := dim.NewBrancaManager(&cfg.Branca)
+if err != nil {
+    log.Fatal("Gagal init Branca manager:", err)
+}
+
+// AuthService via Branca — gunakan NewAuthServiceWithManager
+authService, err := dim.NewAuthServiceWithManager(userStore, tokenStore, blocklist, brancaManager)
+```
+
+`NewAuthService` (lama) tetap berfungsi untuk JWT. `NewAuthServiceWithManager` menerima `TokenManager` apapun.
 
 ---
 
@@ -164,72 +219,41 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 ## Melindungi Route
 
-Gunakan middleware `RequireAuth`. Middleware ini fleksibel dan dapat dikonfigurasi untuk mengambil token dari Header (default) atau Cookie.
+Gunakan middleware `RequireAuth`. Parameternya menerima `TokenManager` — bisa `*JWTManager` atau `*BrancaManager` tanpa perubahan kode lain.
 
 ```go
-// Inisialisasi Middleware (Basic - Bearer Token)
+// JWT
 authMiddleware := dim.RequireAuth(jwtManager, blocklistStore)
 
-// Opsi Lanjutan: Mengambil token dari Cookie (misal nama cookie "session_id")
-// Cocok untuk aplikasi web tradisional / SPA yang menggunakan cookie HttpOnly
+// Branca — signature sama persis
+authMiddleware := dim.RequireAuth(brancaManager, blocklistStore)
+
+// Dengan Cookie token
 cookieAuthMiddleware := dim.RequireAuth(
-    jwtManager, 
+    jwtManager,
     blocklistStore,
     dim.WithCookieToken("session_id"),
 )
 
-// Terapkan ke Route
+// Terapkan ke route
 router.Get("/profile", profileHandler, authMiddleware)
 router.Get("/dashboard", dashboardHandler, cookieAuthMiddleware)
-```
-        user.Email, 
-        nil,
-    )
-    if err != nil {
-        dim.InternalServerError(w, "Gagal generate token")
-        return
-    }
-
-    // 4. Generate Refresh Token (Opsional, untuk long-lived session)
-    refreshToken, _ := jwtManager.GenerateRefreshToken(fmt.Sprintf("%d", user.ID))
-
-    // 5. Return Response
-    dim.OK(w, map[string]string{
-        "access_token":  accessToken,
-        "refresh_token": refreshToken,
-        "type":          "Bearer",
-    })
-}
-```
-
----
-
-## Melindungi Route
-
-Gunakan middleware `dim.RequireAuth` untuk memproteksi endpoint.
-
-### Basic Protection
-
-```go
-// Endpoint ini hanya bisa diakses jika header Authorization valid
-router.Get("/profile", profileHandler, dim.RequireAuth(jwtManager))
 ```
 
 ### Group Protection (Recommended)
 
 ```go
-api := router.Group("/api", dim.RequireAuth(jwtManager))
+api := router.Group("/api", dim.RequireAuth(jwtManager, nil))
 
-// Semua route di bawah /api sekarang terlindungi
+// Semua route di bawah /api terlindungi
 api.Get("/users", listUsers)
 api.Post("/posts", createPost)
 ```
 
 ### Optional Authentication
 
-Gunakan `dim.OptionalAuth` jika endpoint bisa diakses publik tapi butuh konteks user jika ada.
-
 ```go
+// User diisi di context jika token valid, tapi request tidak ditolak jika tidak ada token
 router.Get("/articles/:id", articleHandler, dim.OptionalAuth(jwtManager))
 ```
 
@@ -297,9 +321,10 @@ func refreshHandler(w http.ResponseWriter, r *http.Request) {
 
 ## Praktik Terbaik
 
-1.  **HTTPS Wajib**: Jangan kirim token via HTTP biasa.
-2.  **Short-Lived Access Token**: Set expiry pendek (misal 15-30 menit).
-3.  **Secure Storage**: Di sisi client, simpan token seaman mungkin (HttpOnly Cookie disarankan untuk web).
-4.  **Jangan Simpan Data Sensitif di Claims**: Token bisa didecode oleh siapa saja (hanya di-sign, tidak di-encrypt). Jangan taruh password atau data pribadi di claims.
+1. **HTTPS Wajib** — Jangan kirim token via HTTP biasa.
+2. **Short-Lived Access Token** — Set expiry pendek (15–30 menit).
+3. **Secure Storage** — Di sisi client, simpan token seaman mungkin (HttpOnly Cookie disarankan untuk web).
+4. **Jangan Simpan Data Sensitif di Claims JWT** — JWT payload hanya di-*sign*, bukan di-*encrypt*. Siapa pun bisa membaca isinya. Gunakan Branca jika payload mengandung data yang tidak boleh terbaca client.
+5. **Pilih Branca untuk Internal Service** — Jika token tidak perlu dibaca client dan kerahasiaan payload penting, Branca lebih tepat dari JWT.
 
 ```
