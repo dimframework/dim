@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Server    ServerConfig
 	JWT       JWTConfig
+	Branca    BrancaConfig
 	Database  DatabaseConfig
 	Email     EmailConfig
 	RateLimit RateLimitConfig
@@ -173,9 +174,15 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	brancaCfg, err := loadBrancaConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Server:    serverCfg,
 		JWT:       jwtCfg,
+		Branca:    brancaCfg,
 		Database:  dbCfg,
 		Email:     emailCfg,
 		RateLimit: rateLimitCfg,
@@ -472,6 +479,25 @@ func loadCSRFConfig() (CSRFConfig, error) {
 		CookieName:   GetEnvOrDefault("CSRF_COOKIE_NAME", "csrf_token"),
 		HeaderName:   GetEnvOrDefault("CSRF_HEADER_NAME", "X-CSRF-Token"),
 		CookieMaxAge: cookieMaxAge,
+	}, nil
+}
+
+// loadBrancaConfig loads Branca token configuration from environment variables.
+func loadBrancaConfig() (BrancaConfig, error) {
+	accessExpiry, err := ParseEnvDuration(GetEnvOrDefault("BRANCA_ACCESS_TOKEN_EXPIRY", "15m"))
+	if err != nil {
+		return BrancaConfig{}, fmt.Errorf("invalid BRANCA_ACCESS_TOKEN_EXPIRY: %w", err)
+	}
+
+	refreshExpiry, err := ParseEnvDuration(GetEnvOrDefault("BRANCA_REFRESH_TOKEN_EXPIRY", "168h"))
+	if err != nil {
+		return BrancaConfig{}, fmt.Errorf("invalid BRANCA_REFRESH_TOKEN_EXPIRY: %w", err)
+	}
+
+	return BrancaConfig{
+		Key:                GetEnv("BRANCA_KEY"),
+		AccessTokenExpiry:  accessExpiry,
+		RefreshTokenExpiry: refreshExpiry,
 	}, nil
 }
 
