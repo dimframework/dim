@@ -22,6 +22,13 @@ const (
 	brancaRefreshType = "rt+branca"
 )
 
+// brancaReservedClaims lists claim keys set internally by BrancaManager.
+// extraClaims must not overwrite these.
+var brancaReservedClaims = map[string]struct{}{
+	"sub": {}, "sid": {}, "jti": {}, "email": {},
+	"iat": {}, "exp": {}, "nbf": {}, "typ": {},
+}
+
 // BrancaConfig holds configuration for BrancaManager.
 type BrancaConfig struct {
 	// Key is a 32-byte symmetric key encoded as hex (64 chars) or base64.
@@ -65,6 +72,9 @@ func (m *BrancaManager) GenerateAccessToken(userID, email, sessionID string, ext
 		"typ":   brancaAccessType,
 	}
 	for k, v := range extraClaims {
+		if _, reserved := brancaReservedClaims[k]; reserved {
+			return "", fmt.Errorf("branca: extraClaims cannot overwrite reserved claim %q", k)
+		}
 		claims[k] = v
 	}
 	return m.encode(claims, now)
@@ -122,6 +132,8 @@ func (m *BrancaManager) VerifyRefreshToken(tokenString string) (string, string, 
 }
 
 // GetTokenExpiry returns the expiry time embedded in the token's claims.
+// It intentionally bypasses expiry validation so callers can inspect the exp
+// claim of already-expired tokens (e.g., for auditing or refresh logic).
 func (m *BrancaManager) GetTokenExpiry(tokenString string) (time.Time, error) {
 	claims, err := m.decrypt(tokenString)
 	if err != nil {
@@ -156,7 +168,9 @@ func (m *BrancaManager) encode(claims map[string]interface{}, ts time.Time) (str
 		return "", fmt.Errorf("branca: failed to generate nonce: %w", err)
 	}
 
-	// Header: version(1) + timestamp(4, big-endian) + nonce(24)
+	// Header: version(1) + timestamp(4, big-endian uint32) + nonce(24).
+	// NOTE: uint32 timestamp overflows on 2038-01-19 (Year 2038 Problem).
+	// This matches the Branca spec and is a known limitation.
 	header := make([]byte, brancaHeaderSize)
 	header[0] = brancaVersion
 	binary.BigEndian.PutUint32(header[1:5], uint32(ts.Unix()))
@@ -236,7 +250,16 @@ func (m *BrancaManager) decodeAndValidate(tokenString string) (map[string]interf
 	return claims, nil
 }
 
-// decodeBrancaKey accepts hex (64 chars → 32 bytes), base64, or a raw 32-byte string.
+// decodeBrancaKey accepts a 32-byte key in one of three explicit formats, tried
+// in priority order:
+//  1. Hex string — exactly 64 hex characters (e.g. from `openssl rand -hex 32`)
+//  2. Standard base64 — exactly 44 characters (32 bytes with padding)
+//  3. Raw-URL base64 without padding — exactly 43 characters
+//  4. Raw 32-byte string — exactly 32 characters
+//
+// The length guards ensure each format is only attempted when the input length
+// matches what that encoding produces for 32 bytes, preventing a raw 32-char
+// key from being misinterpreted as base64.
 func decodeBrancaKey(s string) ([]byte, error) {
 	if s == "" {
 		return nil, fmt.Errorf("key is empty")
@@ -249,14 +272,18 @@ func decodeBrancaKey(s string) ([]byte, error) {
 		}
 	}
 
-	// Try standard base64
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b, nil
+	// Try standard base64 with padding (32 bytes → 44 chars)
+	if len(s) == 44 {
+		if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+			return b, nil
+		}
 	}
 
-	// Try base64 URL encoding (no padding)
-	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil {
-		return b, nil
+	// Try raw URL base64 without padding (32 bytes → 43 chars)
+	if len(s) == 43 {
+		if b, err := base64.RawURLEncoding.DecodeString(s); err == nil {
+			return b, nil
+		}
 	}
 
 	// Use raw bytes if exactly 32
@@ -268,7 +295,16 @@ func decodeBrancaKey(s string) ([]byte, error) {
 }
 
 // brancaBase62Encode encodes bytes to base62 using the Branca alphabet.
+// Leading zero bytes are preserved as leading '0' characters.
 func brancaBase62Encode(data []byte) string {
+	leadingZeros := 0
+	for _, b := range data {
+		if b != 0 {
+			break
+		}
+		leadingZeros++
+	}
+
 	n := new(big.Int).SetBytes(data)
 	base := big.NewInt(62)
 	zero := big.NewInt(0)
@@ -284,11 +320,25 @@ func brancaBase62Encode(data []byte) string {
 		result[i], result[j] = result[j], result[i]
 	}
 
-	return string(result)
+	prefix := make([]byte, leadingZeros)
+	for i := range prefix {
+		prefix[i] = brancaBase62Alpha[0]
+	}
+
+	return string(prefix) + string(result)
 }
 
 // brancaBase62Decode decodes a base62 string back to bytes.
+// Leading '0' characters are restored as leading zero bytes.
 func brancaBase62Decode(s string) ([]byte, error) {
+	leadingZeros := 0
+	for _, c := range s {
+		if c != rune(brancaBase62Alpha[0]) {
+			break
+		}
+		leadingZeros++
+	}
+
 	n := new(big.Int)
 	base := big.NewInt(62)
 
@@ -301,5 +351,12 @@ func brancaBase62Decode(s string) ([]byte, error) {
 		n.Add(n, big.NewInt(int64(idx)))
 	}
 
-	return n.Bytes(), nil
+	decoded := n.Bytes()
+	if leadingZeros == 0 {
+		return decoded, nil
+	}
+
+	result := make([]byte, leadingZeros+len(decoded))
+	copy(result[leadingZeros:], decoded)
+	return result, nil
 }
