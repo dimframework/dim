@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +23,20 @@ type RouteInfo struct {
 	Middlewares []string // Daftar nama middleware yang diterapkan
 }
 
-// Router adalah router HTTP utama yang dibangun di atas stdlib http.ServeMux dengan dukungan middleware yang ditingkatkan.
+// staticEntry holds per-method handlers for a static (parameter-free) route path.
+type staticEntry struct {
+	handlers map[string]HandlerFunc // method → handler
+}
+
+// Router adalah router HTTP utama dengan hybrid routing:
+//   - Static routes (tanpa parameter): O(1) map lookup
+//   - Dynamic routes (dengan {param} atau {path...}): O(k) radix tree traversal
+//   - Static file / SPA: dilayani oleh http.ServeMux sebagai fallback
 type Router struct {
-	mux           *http.ServeMux
-	middleware    []MiddlewareFunc
+	mux          *http.ServeMux                            // fallback untuk Static() dan SPA()
+	staticRoutes map[string]*staticEntry                   // O(1) map untuk path tanpa parameter
+	tree         *treeNode                                 // radix tree untuk path dengan parameter
+	middleware   []MiddlewareFunc
 	cachedHandler http.Handler
 	initialized   bool
 	lock          sync.RWMutex
@@ -50,7 +61,9 @@ type Router struct {
 //	http.ListenAndServe(":8080", router)
 func NewRouter() *Router {
 	return &Router{
-		mux: http.NewServeMux(),
+		mux:          http.NewServeMux(),
+		staticRoutes: make(map[string]*staticEntry),
+		tree:         newTreeNode(ntStatic, ""),
 	}
 }
 
@@ -309,7 +322,8 @@ func (r *Router) Group(prefix string, middleware ...MiddlewareFunc) *RouterGroup
 }
 
 // Register mendaftarkan route dengan metode HTTP, path, handler, dan middleware opsional.
-// Menggunakan stdlib http.ServeMux untuk pencocokan pola.
+// Route tanpa parameter disimpan di static map (O(1) lookup).
+// Route dengan {param} atau {path...} disimpan di radix tree (O(k) lookup).
 // Thread-safe: dilindungi dengan mutex untuk pendaftaran route konkuren.
 // Secara otomatis mengubah metode menjadi huruf besar untuk kepatuhan.
 //
@@ -326,28 +340,31 @@ func (r *Router) Register(method, path string, handler HandlerFunc, middleware [
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	// Ensure method is uppercase
 	method = strings.ToUpper(method)
 
-	// Combine method and path for stdlib mux
-	pattern := method + " " + path
-
-	// Wrap handler with route-specific middleware
+	// Wrap with route-specific middleware.
 	finalHandler := handler
 	if len(middleware) > 0 {
 		finalHandler = Chain(handler, middleware...)
 	}
 
-	// Register to stdlib mux
-	r.mux.HandleFunc(pattern, finalHandler)
+	if isStaticPattern(path) {
+		// O(1) static map for parameter-free paths.
+		if r.staticRoutes[path] == nil {
+			r.staticRoutes[path] = &staticEntry{handlers: make(map[string]HandlerFunc)}
+		}
+		r.staticRoutes[path].handlers[method] = finalHandler
+	} else {
+		// Radix tree for paths with URL parameters.
+		r.tree.insert(path, method, finalHandler)
+	}
 
-	// Track route info untuk CLI introspection
+	// Track route info for CLI introspection.
 	handlerName := getFunctionName(handler)
 	middlewareNames := make([]string, 0, len(middleware))
 	for _, mw := range middleware {
 		middlewareNames = append(middlewareNames, getFunctionName(mw))
 	}
-
 	r.routes = append(r.routes, RouteInfo{
 		Method:      method,
 		Path:        path,
@@ -355,10 +372,55 @@ func (r *Router) Register(method, path string, handler HandlerFunc, middleware [
 		Middlewares: middlewareNames,
 	})
 
-	// Invalidate cache
+	// Invalidate cached handler (middleware chain may need rebuild).
+	r.cachedHandler = nil
+	r.initialized = false
+
 	if r.routeCache != nil {
 		r.routeCache.Delete(context.Background(), "all_routes")
 	}
+}
+
+// serveTree is the core dispatch function.
+// Priority: static map (O(1)) → radix tree (O(k)) → mux fallback (Static/SPA).
+func (r *Router) serveTree(w http.ResponseWriter, req *http.Request) {
+	method := req.Method
+	path := req.URL.Path
+
+	// 1. Static map — O(1) lookup for parameter-free routes.
+	if entry, ok := r.staticRoutes[path]; ok {
+		if h, ok := entry.handlers[method]; ok {
+			h(w, req)
+			return
+		}
+		// Path matched but method not registered → 405.
+		allowed := make([]string, 0, len(entry.handlers))
+		for m := range entry.handlers {
+			allowed = append(allowed, m)
+		}
+		sort.Strings(allowed)
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 2. Radix tree — O(k) for routes with {param} or {path...}.
+	h, params, allowed, found := r.tree.match(method, path)
+	if found {
+		if params != nil && len(params.keys) > 0 {
+			req = setRouteParams(req, params)
+		}
+		h(w, req)
+		return
+	}
+	if allowed != "" {
+		w.Header().Set("Allow", allowed)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 3. Fallback to mux for Static() and SPA() routes.
+	r.mux.ServeHTTP(w, req)
 }
 
 // ServeHTTP mengimplementasikan antarmuka http.Handler untuk menangani permintaan HTTP.
@@ -395,13 +457,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // buildHandler membuat handler chain dengan middleware global.
 func (r *Router) buildHandler() http.Handler {
-	// Base handler: mux
-	// Kita menggunakan stdlib mux sepenuhnya untuk routing, 404, dan 405.
-	// Ini membuat implementasi lebih idiomatic dan sesuai dengan standar Go.
-
-	base := HandlerFunc(r.mux.ServeHTTP)
-
-	// Wrap dengan global middleware
+	base := HandlerFunc(r.serveTree)
 	if len(r.middleware) > 0 {
 		return Chain(base, r.middleware...)
 	}

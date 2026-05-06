@@ -120,8 +120,23 @@ func GetRequestID(r *http.Request) string {
 	return ""
 }
 
+// routeParams holds URL parameter key-value pairs captured during tree traversal.
+// Parallel slices (not a map) to avoid allocation overhead; last-added value wins
+// for duplicate keys (supports nested routers).
+type routeParams struct {
+	keys []string
+	vals []string
+}
+
+// setRouteParams stores captured URL params into the request context.
+func setRouteParams(r *http.Request, params *routeParams) *http.Request {
+	ctx := context.WithValue(r.Context(), paramsKey, params)
+	return r.WithContext(ctx)
+}
+
 // GetParam mengambil single path parameter dari request.
-// Menggunakan stdlib r.PathValue() untuk pattern {id}.
+// Membaca dari routeParams context (radix tree) dengan fallback ke r.PathValue()
+// untuk route yang dilayani langsung oleh http.ServeMux (Static/SPA).
 // Returns empty string jika parameter tidak ditemukan.
 //
 // Parameters:
@@ -136,6 +151,15 @@ func GetRequestID(r *http.Request) string {
 //	// Route: GET /users/{id}
 //	userID := GetParam(req, "id")
 func GetParam(r *http.Request, key string) string {
+	if rp, ok := r.Context().Value(paramsKey).(*routeParams); ok {
+		// Reverse iteration: last-added value wins (supports nested groups).
+		for i := len(rp.keys) - 1; i >= 0; i-- {
+			if rp.keys[i] == key {
+				return rp.vals[i]
+			}
+		}
+	}
+	// Fallback for mux-served routes (Static, SPA).
 	return r.PathValue(key)
 }
 
