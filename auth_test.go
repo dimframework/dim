@@ -351,3 +351,87 @@ func TestAuthService_RefreshToken_NoLogWithoutLogger(t *testing.T) {
 
 	// Test passes if no panic occurred
 }
+
+// MockUserWithWorkspace implements Authenticatable with extra field
+type MockUserWithWorkspace struct {
+	MockUser
+	WorkspaceID string
+}
+
+func TestWithClaimsProvider(t *testing.T) {
+	userStore := NewMockUserStore()
+	tokenStore := NewMockTokenStore()
+	config := &JWTConfig{
+		HMACSecret:         "test-secret",
+		SigningMethod:      "HS256",
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+	}
+
+	hashedPassword, _ := HashPassword("ValidPass123!")
+	user := &MockUserWithWorkspace{
+		MockUser: MockUser{
+			ID:       "user-123",
+			Email:    "test@example.com",
+			Password: hashedPassword,
+		},
+		WorkspaceID: "workspace-456",
+	}
+	// We need to add it to mock store. Since mock store uses map[string]*MockUser,
+	// we need to be careful with type assertion in provider.
+	userStore.users[user.ID] = &user.MockUser
+
+	service, err := NewAuthService(userStore, tokenStore, nil, config)
+	if err != nil {
+		t.Fatalf("NewAuthService error: %v", err)
+	}
+
+	// Register ClaimsProvider
+	service.WithClaimsProvider(func(ctx context.Context, u Authenticatable) (map[string]interface{}, error) {
+		claims := make(map[string]interface{})
+		// In real world, we might need to fetch from DB or use type assertion if the object is already full
+		if user.ID == u.GetID() {
+			claims["workspace_id"] = user.WorkspaceID
+		}
+		return claims, nil
+	})
+
+	ctx := context.Background()
+
+	// 1. Test Login with Claims
+	accessToken, _, err := service.Login(ctx, "test@example.com", "ValidPass123!")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	// Verify claims in token
+	tokenManager, _ := NewJWTManager(config)
+	claims, err := tokenManager.VerifyToken(accessToken)
+	if err != nil {
+		t.Fatalf("VerifyToken error: %v", err)
+	}
+
+	if claims["workspace_id"] != "workspace-456" {
+		t.Errorf("Expected workspace_id 'workspace-456', got %v", claims["workspace_id"])
+	}
+
+	// 2. Test Refresh Token with Claims
+	_, refreshToken, _ := service.Login(ctx, "test@example.com", "ValidPass123!")
+	
+	// Fast forward time slightly to ensure rotation works if needed
+	time.Sleep(10 * time.Millisecond)
+	
+	newAccessToken, _, err := service.RefreshToken(ctx, refreshToken)
+	if err != nil {
+		t.Fatalf("RefreshToken() error = %v", err)
+	}
+
+	newClaims, err := tokenManager.VerifyToken(newAccessToken)
+	if err != nil {
+		t.Fatalf("VerifyAccessToken (after refresh) error: %v", err)
+	}
+
+	if newClaims["workspace_id"] != "workspace-456" {
+		t.Errorf("Expected workspace_id 'workspace-456' after refresh, got %v", newClaims["workspace_id"])
+	}
+}

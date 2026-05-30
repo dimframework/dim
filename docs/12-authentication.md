@@ -11,6 +11,7 @@ Pelajari cara mengimplementasikan autentikasi token yang aman menggunakan JWT at
   - [Konfigurasi JWT](#konfigurasi-jwt)
   - [Konfigurasi Branca](#konfigurasi-branca)
 - [Inisialisasi Token Manager](#inisialisasi-token-manager)
+- [Custom Claims (WithClaimsProvider)](#custom-claims-withclaimsprovider)
 - [User Registration](#user-registration)
 - [User Login](#user-login)
 - [Melindungi Route](#melindungi-route)
@@ -154,6 +155,38 @@ authService, err := dim.NewAuthServiceWithManager(userStore, tokenStore, blockli
 
 ---
 
+## Custom Claims (WithClaimsProvider)
+
+Anda dapat menyisipkan data tambahan (custom claims) ke dalam Access Token, seperti `workspace_id`, `role`, atau preferensi user lainnya menggunakan `WithClaimsProvider`. 
+
+Custom claims ini akan otomatis disertakan setiap kali user melakukan **Login** atau **Refresh Token**.
+
+### 1. Registrasi Provider
+
+Daftarkan fungsi provider saat inisialisasi `AuthService`. Fungsi ini menerima `dim.Authenticatable` (objek user yang sedang login) dan mengembalikan `map[string]interface{}`.
+
+```go
+authService.WithClaimsProvider(func(ctx context.Context, user dim.Authenticatable) (map[string]interface{}, error) {
+    claims := make(map[string]interface{})
+    
+    // Biasanya Anda akan melakukan type-assertion ke struct User aplikasi Anda
+    // agar bisa mengakses field kustom seperti WorkspaceID
+    if u, ok := user.(*models.User); ok {
+        claims["workspace_id"] = u.WorkspaceID
+        claims["role"] = u.Role
+    }
+    
+    return claims, nil
+})
+```
+
+### 2. Keamanan Payload
+
+- **JWT**: Payload bersifat publik (Base64). **Jangan** simpan data sensitif seperti password, alamat, atau nomor telepon di sini.
+- **Branca**: Payload terenkripsi penuh. Anda lebih aman menyimpan data yang sedikit lebih sensitif di sini jika diperlukan.
+
+---
+
 ## User Registration
 
 Saat registrasi, Anda biasanya hanya membuat user di database. Token baru dibuat saat login.
@@ -272,10 +305,14 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Akses field user
+    // Akses field standar
     fmt.Printf("User ID: %s, Email: %s\n", user.ID, user.Email)
     
-    // Akses claims tambahan
+    // Akses custom claims (dimasukkan via WithClaimsProvider)
+    if workspaceID, ok := user.Claims["workspace_id"].(string); ok {
+        fmt.Println("Workspace ID:", workspaceID)
+    }
+
     if role, ok := user.Claims["role"]; ok {
         fmt.Println("Role:", role)
     }
@@ -326,5 +363,3 @@ func refreshHandler(w http.ResponseWriter, r *http.Request) {
 3. **Secure Storage** — Di sisi client, simpan token seaman mungkin (HttpOnly Cookie disarankan untuk web).
 4. **Jangan Simpan Data Sensitif di Claims JWT** — JWT payload hanya di-*sign*, bukan di-*encrypt*. Siapa pun bisa membaca isinya. Gunakan Branca jika payload mengandung data yang tidak boleh terbaca client.
 5. **Pilih Branca untuk Internal Service** — Jika token tidak perlu dibaca client dan kerahasiaan payload penting, Branca lebih tepat dari JWT.
-
-```

@@ -253,3 +253,30 @@ Membuat validator baru.
 - `NewLogger(level slog.Level) *Logger`
 - `NewLoggerWithWriter(w io.Writer, level slog.Level) *Logger`
 - `NewTextLogger(level slog.Level) *Logger`
+
+---
+
+## Authentication & Token API
+
+### AuthService
+- `NewAuthService(userStore, tokenStore, blocklist, jwtConfig) (*AuthService, error)`
+- `NewAuthServiceWithManager(userStore, tokenStore, blocklist, manager) (*AuthService, error)`
+- `(s *AuthService) WithClaimsProvider(provider ClaimsProvider) *AuthService`: Mendaftarkan custom claims provider.
+- `(s *AuthService) WithLogger(logger *Logger) *AuthService`
+- `(s *AuthService) Login(ctx, email, password) (accessToken, refreshToken, error)`
+- `(s *AuthService) RefreshToken(ctx, refreshToken) (accessToken, refreshToken, error)`
+- `(s *AuthService) Logout(ctx, refreshToken) error`
+- `(s *AuthService) RequestPasswordReset(ctx, email) (token, error)`
+- `(s *AuthService) ResetPassword(ctx, token, newPassword) error`
+
+### Token Managers
+- `NewJWTManager(config) (*JWTManager, error)`
+- `NewBrancaManager(config) (*BrancaManager, error)`
+- `(m) GenerateAccessToken(userID, email, sessionID, extraClaims) (string, error)`
+- `(m) GenerateRefreshToken(userID, sessionID) (string, error)`
+- `(m) VerifyToken(token) (map[string]interface{}, error)`
+- `(m) VerifyRefreshToken(token) (userID, sessionID, error)`
+
+### Types
+- `type ClaimsProvider func(ctx context.Context, user Authenticatable) (map[string]interface{}, error)`
+- `type Authenticatable interface { GetID(), GetEmail(), GetPassword(), SetPassword(string) }`
