@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.6.1] - 2026-05-30
+
+### Added
+- **`WithClaimsProvider` tests**: Added comprehensive tests for `WithClaimsProvider` to verify custom claims are correctly embedded in access tokens.
+- **Authentication & Token API docs**: Added full API reference section for `AuthService`, `JWTManager`, `BrancaManager`, `ClaimsProvider`, and `Authenticatable` in `docs/23-api-reference.md`.
+- **`WithClaimsProvider` docs**: Added usage guide for `WithClaimsProvider` in `docs/12-authentication.md`.
+
+### Fixed
+- **`BRANCA_KEY` not validated at startup**: `Validate()` now decodes `BRANCA_KEY` at startup and returns a descriptive error if the key is invalid (wrong length or format). Previously, an invalid key was only caught at runtime when `NewBrancaManager` was called.
+- **`JWT_SECRET` always required even when using Branca**: `Validate()` no longer requires `JWT_SECRET` when `BRANCA_KEY` is set. If `BRANCA_KEY` is present, Branca is treated as the active token provider and JWT validation is skipped entirely.
+
+---
+
 ## [v0.6.0] - 2026-05-07
 
 ### Added

@@ -518,16 +518,23 @@ func loadBrancaConfig() (BrancaConfig, error) {
 }
 
 // Validate memvalidasi konfigurasi aplikasi untuk memastikan nilai required sudah ada.
-// Mengecek JWT_SECRET, DB_WRITE_HOST, DB_NAME, dan DB_USER.
+// Jika BRANCA_KEY di-set, validasi Branca dijalankan dan JWT_SECRET tidak wajib.
+// Jika BRANCA_KEY kosong, validasi JWT dijalankan (JWT_SECRET atau JWT_PRIVATE_KEY wajib).
 func (c *Config) Validate() error {
-	if strings.HasPrefix(c.JWT.SigningMethod, "HS") {
-		if c.JWT.HMACSecret == "" {
-			return fmt.Errorf("JWT_SECRET is required for HMAC signing method")
+	if c.Branca.Key != "" {
+		// Validasi format BRANCA_KEY sekarang agar gagal saat startup, bukan saat runtime.
+		if _, err := decodeBrancaKey(c.Branca.Key); err != nil {
+			return fmt.Errorf("BRANCA_KEY is invalid: %w", err)
 		}
-	} else if strings.HasPrefix(c.JWT.SigningMethod, "RS") || strings.HasPrefix(c.JWT.SigningMethod, "ES") {
-		if c.JWT.PrivateKey == "" && c.JWT.JWKSURL == "" {
-			// Jika pakai asymmetric, minimal butuh Private Key (untuk sign) ATAU JWKS (untuk verify saja)
-			return fmt.Errorf("JWT_PRIVATE_KEY is required for RSA/ECDSA signing method")
+	} else {
+		if strings.HasPrefix(c.JWT.SigningMethod, "HS") {
+			if c.JWT.HMACSecret == "" {
+				return fmt.Errorf("JWT_SECRET is required for HMAC signing method")
+			}
+		} else if strings.HasPrefix(c.JWT.SigningMethod, "RS") || strings.HasPrefix(c.JWT.SigningMethod, "ES") {
+			if c.JWT.PrivateKey == "" && c.JWT.JWKSURL == "" {
+				return fmt.Errorf("JWT_PRIVATE_KEY is required for RSA/ECDSA signing method")
+			}
 		}
 	}
 

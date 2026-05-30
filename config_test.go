@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -214,6 +215,43 @@ func TestValidate_MissingJWTSecret(t *testing.T) {
 	}
 	if err.Error() != "JWT_SECRET is required for HMAC signing method" {
 		t.Errorf("Expected 'JWT_SECRET is required for HMAC signing method', got %v", err)
+	}
+}
+
+func TestValidate_BrancaKeySkipsJWTSecretRequirement(t *testing.T) {
+	cfg := &Config{
+		Branca: BrancaConfig{Key: testBrancaKey()},
+		JWT:    JWTConfig{HMACSecret: "", SigningMethod: "HS256"},
+		Database: DatabaseConfig{
+			Driver:    "postgres",
+			WriteHost: "localhost",
+			Database:  "testdb",
+			Username:  "user",
+		},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("Validate() should not require JWT_SECRET when BRANCA_KEY is set, got: %v", err)
+	}
+}
+
+func TestValidate_InvalidBrancaKey(t *testing.T) {
+	cfg := &Config{
+		Branca: BrancaConfig{Key: "tooshort"},
+		JWT:    JWTConfig{HMACSecret: "", SigningMethod: "HS256"},
+		Database: DatabaseConfig{
+			Driver:    "postgres",
+			WriteHost: "localhost",
+			Database:  "testdb",
+			Username:  "user",
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Validate() should fail when BRANCA_KEY is invalid")
+	}
+	if err != nil && !strings.Contains(err.Error(), "BRANCA_KEY is invalid") {
+		t.Errorf("Expected error about invalid BRANCA_KEY, got: %v", err)
 	}
 }
 
