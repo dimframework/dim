@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"sync"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteDatabase is the SQLite implementation of Database interface
@@ -25,7 +25,7 @@ type SQLiteDatabase struct {
 //   - *SQLiteDatabase: database instance ready for use
 //   - error: error if connection fails
 func NewSQLiteDatabase(config DatabaseConfig) (*SQLiteDatabase, error) {
-	db, err := sql.Open("sqlite3", config.Database)
+	db, err := sql.Open("sqlite", config.Database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
