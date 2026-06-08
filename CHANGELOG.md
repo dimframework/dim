@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Ctx` helper (`dim.Of`)**: Added opt-in ergonomic wrapper that bundles `http.ResponseWriter` and `*http.Request` into a single `*Ctx` object. Reduces boilerplate in handlers that call many helpers — use `c := dim.Of(w, r)` and replace `dim.GetParam(r, "id")` with `c.Param("id")`, `dim.OK(w, data)` with `c.OK(data)`, etc. No breaking changes; existing handlers continue to work unchanged. Closes [#6](https://github.com/dimframework/dim/issues/6).
+  - Request helpers: `Param`, `Query`, `Queries`, `Header`, `Cookie`, `AuthToken`, `User`, `Claims`, `RequestID`, `ClientIP`
+  - `Bind(&v)` — decodes JSON request body into a struct
+  - `Validate()` — shorthand for `dim.NewValidator()`
+  - Response helpers: `JSON`, `OK`, `Created`, `NoContent`, `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `InternalServerError`, `TooManyRequests`, `AppError`
+- **`Ctx` docs**: Added "Ctx Helper — Ergonomic Syntax" section to `docs/07-response-helpers.md` with method tables, side-by-side comparison, and a complete `CreateUser` handler example.
+
+---
+
+## [v0.6.2] - 2026-06-04
+
+### Changed
+- **Pure Go SQLite driver**: Replaced `github.com/mattn/go-sqlite3` (CGO) with `modernc.org/sqlite` (pure Go). No CGO toolchain required — builds work out of the box on all platforms without a C compiler. API and behavior are unchanged.
+
 ---
 
 ## [v0.6.1] - 2026-05-30
@@ -58,4 +73,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CORS Logic**: Updated CORS middleware to pass through non-CORS `OPTIONS` requests (requests without `Origin` header) instead of swallowing them.
 - **CORS Max-Age**: Fixed bug in `Access-Control-Max-Age` header where integer value was incorrectly converted to string.
 - **Documentation**: Updated `middleware.md`, `configuration.md`, and `security.md` with new configuration options and best practices.
-

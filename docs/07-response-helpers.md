@@ -9,6 +9,8 @@ Pelajari cara mengirim response dengan format yang konsisten dan terstruktur.
 - [Json Helper](#json-helper)
 - [JsonPagination Helper](#jsonpagination-helper)
 - [JsonError Helper](#jsonerror-helper)
+- [Pembantu Tambahan](#pembantu-tambahan)
+- [Ctx Helper — Ergonomic Syntax](#ctx-helper--ergonomic-syntax)
 - [Custom Headers](#custom-headers)
 - [Response Status Codes](#response-status-codes)
 - [Streaming Responses](#streaming-responses)
@@ -415,6 +417,192 @@ func customHandler(w http.ResponseWriter, r *http.Request) {
     dim.SetCookie(w, &http.Cookie{Name: "my-cookie", Value: "val"})
     dim.SetStatus(w, http.StatusOK)
     w.Write([]byte("Payload kustom"))
+}
+```
+
+---
+
+## Ctx Helper — Ergonomic Syntax
+
+`Ctx` adalah wrapper opsional yang membungkus `http.ResponseWriter` dan `*http.Request` dalam satu objek. Gunakan `dim.Of(w, r)` pada handler yang banyak memanggil helpers agar kode lebih ringkas dan mudah dibaca.
+
+> **Opt-in sepenuhnya** — Handler yang tidak menggunakan `dim.Of` tetap berjalan normal. Tidak ada breaking change.
+
+### Membuat Ctx
+
+```go
+func GetUserHandler(w http.ResponseWriter, r *http.Request) {
+    c := dim.Of(w, r)
+    // ...
+}
+```
+
+### Perbandingan: Tanpa vs Dengan Ctx
+
+```go
+// ── Tanpa Ctx ──────────────────────────────────────────────────
+func GetUserHandler(w http.ResponseWriter, r *http.Request) {
+    id       := dim.GetParam(r, "id")
+    page     := dim.GetQueryParam(r, "page")
+    token, _ := dim.GetAuthToken(r)
+    user, _  := dim.GetUser(r)
+
+    if token == "" {
+        dim.Unauthorized(w, "Token tidak ditemukan")
+        return
+    }
+
+    dim.OK(w, user)
+}
+
+// ── Dengan Ctx ─────────────────────────────────────────────────
+func GetUserHandler(w http.ResponseWriter, r *http.Request) {
+    c := dim.Of(w, r)
+
+    id      := c.Param("id")
+    page    := c.Query("page")
+    token, ok := c.AuthToken()
+
+    if !ok {
+        c.Unauthorized("Token tidak ditemukan")
+        return
+    }
+
+    user, _ := c.User()
+    c.OK(user)
+}
+```
+
+### Method Request
+
+| Method | Deskripsi |
+|--------|-----------|
+| `c.Param(key)` | Ambil path parameter (contoh: `/users/{id}`) |
+| `c.Query(key)` | Ambil satu query parameter |
+| `c.Queries(keys...)` | Ambil beberapa query parameters sekaligus |
+| `c.Header(key)` | Ambil nilai request header |
+| `c.Cookie(name)` | Ambil nilai cookie |
+| `c.AuthToken()` | Ekstrak Bearer token dari header `Authorization` |
+| `c.User()` | Ambil authenticated user dari context |
+| `c.Claims()` | Ambil custom claims dari context |
+| `c.RequestID()` | Ambil request ID dari context |
+| `c.ClientIP()` | Ambil IP address client |
+| `c.Bind(&v)` | Decode JSON body ke struct |
+| `c.Validate()` | Buat instance `*Validator` baru |
+
+### Method Response
+
+| Method | Status | Deskripsi |
+|--------|--------|-----------|
+| `c.JSON(status, data)` | custom | Custom status code |
+| `c.OK(data)` | 200 | Sukses dengan data |
+| `c.Created(data)` | 201 | Resource berhasil dibuat |
+| `c.NoContent()` | 204 | Sukses tanpa body |
+| `c.BadRequest(msg, errs)` | 400 | Validasi atau request tidak valid |
+| `c.Unauthorized(msg)` | 401 | Autentikasi diperlukan |
+| `c.Forbidden(msg)` | 403 | Tidak punya permission |
+| `c.NotFound(msg)` | 404 | Resource tidak ditemukan |
+| `c.Conflict(msg, errs)` | 409 | Duplikat atau state conflict |
+| `c.InternalServerError(msg)` | 500 | Error server tidak terduga |
+| `c.TooManyRequests(retryAfter)` | 429 | Rate limit tercapai |
+| `c.AppError(appErr)` | varies | Kirim `*AppError` langsung |
+
+### Contoh Lengkap — Create User
+
+```go
+type CreateUserRequest struct {
+    Name     string `json:"name"`
+    Email    string `json:"email"`
+    Password string `json:"password"`
+}
+
+func CreateUserHandler(userService *UserService) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        c := dim.Of(w, r)
+
+        // 1. Decode body
+        var req CreateUserRequest
+        if err := c.Bind(&req); err != nil {
+            c.BadRequest("Format request tidak valid", nil)
+            return
+        }
+
+        // 2. Validasi
+        v := c.Validate().
+            Required("name", req.Name).
+            Required("email", req.Email).
+            Email("email", req.Email).
+            Required("password", req.Password).
+            MinLength("password", req.Password, 8)
+
+        if !v.IsValid() {
+            c.BadRequest("Validasi gagal", v.ErrorMap())
+            return
+        }
+
+        // 3. Buat user
+        user, err := userService.Create(r.Context(), req.Email, req.Name, req.Password)
+        if err != nil {
+            if dim.IsAppError(err) {
+                appErr, _ := dim.AsAppError(err)
+                c.AppError(appErr)
+                return
+            }
+            c.InternalServerError("Gagal membuat user")
+            return
+        }
+
+        c.Created(user)
+    }
+}
+```
+
+### Ctx.Bind — Decode JSON Body
+
+`Bind` men-decode JSON body request ke struct yang diberikan. Cocok dipasangkan dengan `Validate` untuk alur parse → validasi yang bersih.
+
+```go
+var payload struct {
+    Title   string `json:"title"`
+    Content string `json:"content"`
+}
+
+if err := c.Bind(&payload); err != nil {
+    c.BadRequest("Format JSON tidak valid", nil)
+    return
+}
+```
+
+> `Bind` hanya membaca body satu kali. Jika perlu membaca ulang, gunakan `io.TeeReader` atau buffer manual sebelum memanggil `dim.Of`.
+
+### Ctx.Validate — Shorthand Validator
+
+`c.Validate()` adalah singkatan dari `dim.NewValidator()`. Hasilnya adalah `*Validator` yang mendukung method chaining penuh — lihat [dokumentasi validasi](13-validation.md) untuk daftar semua rule.
+
+```go
+v := c.Validate().
+    Required("email", email).
+    Email("email", email)
+
+if !v.IsValid() {
+    c.BadRequest("Validasi gagal", v.ErrorMap())
+    return
+}
+```
+
+### Ctx.AppError — Kirim AppError Langsung
+
+Jika service layer mengembalikan `*AppError`, gunakan `c.AppError` untuk langsung mengirimnya tanpa perlu mengekstrak status code secara manual.
+
+```go
+user, err := userService.FindByEmail(r.Context(), email)
+if err != nil {
+    if appErr, ok := dim.AsAppError(err); ok {
+        c.AppError(appErr) // status, message, dan field errors otomatis
+        return
+    }
+    c.InternalServerError("Error tidak terduga")
+    return
 }
 ```
 
