@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.7.0] - 2026-06-08
+
 ### Added
 - **`Ctx` helper (`dim.Of`)**: Added opt-in ergonomic wrapper that bundles `http.ResponseWriter` and `*http.Request` into a single `*Ctx` object. Reduces boilerplate in handlers that call many helpers — use `c := dim.Of(w, r)` and replace `dim.GetParam(r, "id")` with `c.Param("id")`, `dim.OK(w, data)` with `c.OK(data)`, etc. No breaking changes; existing handlers continue to work unchanged. Closes [#6](https://github.com/dimframework/dim/issues/6).
   - Request helpers: `Param`, `Query`, `Queries`, `Header`, `Cookie`, `AuthToken`, `User`, `Claims`, `RequestID`, `ClientIP`
