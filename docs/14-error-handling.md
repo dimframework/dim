@@ -198,14 +198,14 @@ v.Email("email", email)
 v.Required("password", password)
 
 if !v.IsValid() {
-    dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrorsFrom(v.ErrorMap()))
+    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.ErrorMap())
     return
 }
 ```
 
 ### Multiple Errors per Field
 
-Satu field bisa memiliki lebih dari satu error message menggunakan `[]string`:
+Satu field bisa memiliki lebih dari satu error message — via `FieldErrors` dengan `[]string`, atau via `Validator.WithFullErrors()`:
 
 ```json
 {
@@ -217,13 +217,28 @@ Satu field bisa memiliki lebih dari satu error message menggunakan `[]string`:
 }
 ```
 
-**Handler code**:
+**Via `FieldErrors` langsung**:
 ```go
 dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrors{
     "email":    []string{"Invalid format", "Already taken"},
     "password": "Too weak",
 })
 ```
+
+**Via `Validator.WithFullErrors()`**:
+```go
+v := dim.NewValidator().
+    Required("email", email).
+    Email("email", email).
+    WithFullErrors()
+
+if !v.IsValid() {
+    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.ErrorMap())
+    return
+}
+```
+
+> `WithFullErrors()` bisa dipanggil di awal, tengah, atau akhir chain dan berlaku untuk validasi setelah pemanggilan.
 
 ### Error dengan Additional Info
 
@@ -238,7 +253,7 @@ dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrors{
 
 **Handler code**:
 ```go
-dim.JsonError(w, http.StatusTooManyRequests, "Rate limit exceeded", map[string]string{
+dim.JsonError(w, http.StatusTooManyRequests, "Rate limit exceeded", dim.FieldErrors{
     "retry_after": "3600",
 })
 ```

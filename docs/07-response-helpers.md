@@ -334,13 +334,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ```go
 func registerHandler(w http.ResponseWriter, r *http.Request) {
-    // Validation error
     dim.JsonError(w, http.StatusBadRequest, "Validation failed",
-        map[string]string{
-            "email": "Invalid email format",
+        dim.FieldErrors{
+            "email":    "Invalid email format",
             "password": "Too short",
         })
-    
+
     // Response:
     // {
     //   "message": "Validation failed",
@@ -407,17 +406,29 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 -   **`JsonAppError(w, appErr)`**: Mengurai `*AppError` dan mengirim response yang sesuai.
 
 ```go
-// Validasi gagal — single error per field
+// Validasi gagal — single error per field (first-error-wins)
 func createUser(w http.ResponseWriter, r *http.Request) {
     v := dim.NewValidator()
     v.Required("email", req.Email)
     if !v.IsValid() {
-        dim.BadRequest(w, "Validasi gagal", dim.FieldErrorsFrom(v.ErrorMap())) // HTTP 400
+        dim.BadRequest(w, "Validasi gagal", v.ErrorMap()) // HTTP 400
         return
     }
 }
 
-// Validasi gagal — multiple errors per field
+// Validasi gagal — multiple errors per field via WithFullErrors()
+func createUser(w http.ResponseWriter, r *http.Request) {
+    v := dim.NewValidator().
+        Required("email", req.Email).
+        Email("email", req.Email).
+        WithFullErrors()
+    if !v.IsValid() {
+        dim.BadRequest(w, "Validasi gagal", v.ErrorMap()) // HTTP 400
+        return
+    }
+}
+
+// Validasi gagal — multiple errors per field via FieldErrors langsung
 func createUser(w http.ResponseWriter, r *http.Request) {
     dim.BadRequest(w, "Validasi gagal", dim.FieldErrors{
         "email": []string{"tidak valid", "sudah terdaftar"},
