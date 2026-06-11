@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.1] - 2026-06-11
+
+### Changed
+- **`Validator.ErrorMap()` return type**: Changed from `map[string]string` to `FieldErrors` (type alias for `map[string]any`). This allows seamless integration with `BadRequest()` and `JsonError()` — no adapter function needed. All signatures updated; `FieldErrorsFrom()` is now redundant and can be removed in application code.
+  - **Before**: `dim.BadRequest(w, msg, dim.FieldErrorsFrom(v.ErrorMap()))`
+  - **After**: `dim.BadRequest(w, msg, v.ErrorMap())`
+  - Backward compatible for typical use cases (single error per field via first-error-wins).
+
+### Added
+- **`Validator.WithFullErrors()` method**: Enables accumulating all errors per field instead of first-error-wins. Can be chained at start, middle, or end of the validation chain. After `WithFullErrors()` is called, subsequent rules collect all errors in `map[string][]string` internally and merge them into `FieldErrors` on `ErrorMap()`.
+  - **Example**: `v := dim.NewValidator().WithFullErrors().Required(...).Email(...)`
+  - Errors are returned as `FieldErrors{"field": []string{"error1", "error2"}}`
+
+### Updated
+- **Docs**: Updated `13-validation.md`, `14-error-handling.md`, and `07-response-helpers.md` to reflect the new `ErrorMap()` behavior, `WithFullErrors()` patterns, and removed `FieldErrorsFrom()` adapter usage.
+
+---
+
 ## [v0.7.0] - 2026-06-08
 
 ### Added
