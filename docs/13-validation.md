@@ -20,7 +20,7 @@ Pelajari cara melakukan validasi input dengan validator framework dim.
 
 ### Filosofi Validasi di dim
 
-Framework dim menggunakan model **single-error-per-field**:
+Validator di framework dim menggunakan model **first-error-wins** secara default — setiap field menyimpan maksimal satu error:
 
 ```json
 {
@@ -32,16 +32,28 @@ Framework dim menggunakan model **single-error-per-field**:
 }
 ```
 
-Bukan multiple errors per field:
-```json
-{
-  "errors": {
-    "email": [
-      "Email is required",
-      "Invalid email format"
-    ]
-  }
-}
+Untuk mengumpulkan **semua errors per field**, gunakan `WithFullErrors()`:
+
+```go
+v := dim.NewValidator().
+    Required("email", email).
+    Email("email", email).
+    WithFullErrors()
+
+// ErrorMap() → FieldErrors{"email": []string{"wajib diisi", "format tidak valid"}}
+```
+
+`WithFullErrors()` bisa dipanggil di awal, tengah, atau akhir chain:
+
+```go
+// Di awal — semua rules setelahnya accumulate
+v := dim.NewValidator().WithFullErrors().Required(...).Email(...)
+
+// Di tengah — rules sebelum tetap first-error-wins, setelahnya accumulate
+v := dim.NewValidator().Required(...).WithFullErrors().Email(...)
+
+// Di akhir — biasanya untuk kasus rules per-field sudah jelas
+v := dim.NewValidator().Required(...).Email(...).WithFullErrors()
 ```
 
 ### Validation Flow
@@ -54,13 +66,13 @@ Validator
   ├─ Format check (email, etc)
   ├─ Length check
   ├─ Custom rules
-  └─ Collect errors (1 per field)
+  └─ Collect errors (default: 1 per field | WithFullErrors(): semua)
   ↓
 IsValid?
   ├─ YES → Continue
-  └─ NO → Return errors
+  └─ NO → Return errors via ErrorMap()
   ↓
-Response
+Response (FieldErrors)
 ```
 
 ### Kapan Validasi?

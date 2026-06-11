@@ -6,9 +6,12 @@ import (
 	"strings"
 )
 
-// Validator is a simple validation utility
+// Validator is a simple validation utility.
+// Default mode: first-error-wins — setiap field hanya menyimpan satu error.
+// Full-errors mode: semua violations dikumpulkan per field via WithFullErrors().
 type Validator struct {
-	errors map[string]string
+	errors     map[string][]string
+	fullErrors bool
 }
 
 // NewValidator membuat instance Validator baru dengan empty error map.
@@ -19,21 +22,58 @@ type Validator struct {
 //
 // Example:
 //
+//	// Default — first-error-wins
+//	v := NewValidator().
+//	  Required("email", email).
+//	  Email("email", email)
+//
+//	// Full errors — semua violations dikumpulkan
 //	v := NewValidator().
 //	  Required("email", email).
 //	  Email("email", email).
-//	  Required("password", password)
-//	if !v.IsValid() {
-//	  return v.ErrorMap()
-//	}
+//	  WithFullErrors()
 func NewValidator() *Validator {
 	return &Validator{
-		errors: make(map[string]string),
+		errors: make(map[string][]string),
 	}
 }
 
+// WithFullErrors mengaktifkan mode accumulate — semua violations per field dikumpulkan.
+// Bisa dipanggil di mana saja dalam chain; berlaku untuk validasi setelah pemanggilan ini.
+// ErrorMap() akan return []string per field jika ada lebih dari satu error.
+//
+// Returns:
+//   - *Validator: pointer to validator untuk method chaining
+//
+// Example:
+//
+//	// Di awal
+//	v := NewValidator().WithFullErrors().
+//	  Required("email", email).
+//	  Email("email", email)
+//
+//	// Di akhir
+//	v := NewValidator().
+//	  Required("email", email).
+//	  Email("email", email).
+//	  WithFullErrors()
+func (v *Validator) WithFullErrors() *Validator {
+	v.fullErrors = true
+	return v
+}
+
+// addError menambahkan error ke field berdasarkan mode aktif.
+// Default: skip jika field sudah punya error (first-error-wins).
+// Full-errors: selalu append.
+func (v *Validator) addError(field, message string) {
+	if !v.fullErrors && len(v.errors[field]) > 0 {
+		return
+	}
+	v.errors[field] = append(v.errors[field], message)
+}
+
 // Required memvalidasi bahwa field tidak kosong (setelah trimspace).
-// Jika field sudah ada error, skip validation ini (first error wins).
+// Jika field sudah ada error dan mode default, skip validation ini (first error wins).
 //
 // Parameters:
 //   - field: nama field untuk error message
@@ -46,8 +86,8 @@ func NewValidator() *Validator {
 //
 //	v.Required("email", email)
 func (v *Validator) Required(field, value string) *Validator {
-	if _, exists := v.errors[field]; !exists && strings.TrimSpace(value) == "" {
-		v.errors[field] = field + " wajib diisi"
+	if strings.TrimSpace(value) == "" {
+		v.addError(field, field+" wajib diisi")
 	}
 	return v
 }
@@ -66,10 +106,9 @@ func (v *Validator) Required(field, value string) *Validator {
 //
 //	v.Email("email", email)
 func (v *Validator) Email(field, value string) *Validator {
-	// Simple email validation regex
 	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-	if _, exists := v.errors[field]; !exists && !emailRegex.MatchString(value) {
-		v.errors[field] = field + " harus berupa alamat email yang valid"
+	if !emailRegex.MatchString(value) {
+		v.addError(field, field+" harus berupa alamat email yang valid")
 	}
 	return v
 }
@@ -89,8 +128,8 @@ func (v *Validator) Email(field, value string) *Validator {
 //
 //	v.MinLength("password", password, 8)
 func (v *Validator) MinLength(field, value string, min int) *Validator {
-	if _, exists := v.errors[field]; !exists && len(strings.TrimSpace(value)) < min {
-		v.errors[field] = field + " harus minimal " + string(rune(min)) + " karakter"
+	if len(strings.TrimSpace(value)) < min {
+		v.addError(field, field+" harus minimal "+string(rune(min))+" karakter")
 	}
 	return v
 }
@@ -109,8 +148,8 @@ func (v *Validator) MinLength(field, value string, min int) *Validator {
 //
 //	v.MaxLength("name", name, 255)
 func (v *Validator) MaxLength(field, value string, max int) *Validator {
-	if _, exists := v.errors[field]; !exists && len(value) > max {
-		v.errors[field] = field + " tidak boleh melebihi " + string(rune(max)) + " karakter"
+	if len(value) > max {
+		v.addError(field, field+" tidak boleh melebihi "+string(rune(max))+" karakter")
 	}
 	return v
 }
@@ -129,8 +168,8 @@ func (v *Validator) MaxLength(field, value string, max int) *Validator {
 //
 //	v.Length("code", code, 6)
 func (v *Validator) Length(field, value string, length int) *Validator {
-	if _, exists := v.errors[field]; !exists && len(value) != length {
-		v.errors[field] = field + " harus tepat " + string(rune(length)) + " karakter"
+	if len(value) != length {
+		v.addError(field, field+" harus tepat "+string(rune(length))+" karakter")
 	}
 	return v
 }
@@ -149,18 +188,16 @@ func (v *Validator) Length(field, value string, length int) *Validator {
 //
 //	v.Pattern("phone", phone, "^\\d{10,}$")
 func (v *Validator) Pattern(field, value string, pattern string) *Validator {
-	if _, exists := v.errors[field]; exists {
+	if !v.fullErrors && len(v.errors[field]) > 0 {
 		return v
 	}
-
 	regex, err := regexp.Compile(pattern)
 	if err != nil {
-		v.errors[field] = "pola validasi tidak valid"
+		v.addError(field, "pola validasi tidak valid")
 		return v
 	}
-
 	if !regex.MatchString(value) {
-		v.errors[field] = "format " + field + " tidak valid"
+		v.addError(field, "format "+field+" tidak valid")
 	}
 	return v
 }
@@ -180,8 +217,8 @@ func (v *Validator) Pattern(field, value string, pattern string) *Validator {
 //
 //	v.Custom("username", func(u string) bool { return len(u) > 3 }, username, "Username minimal 4 karakter")
 func (v *Validator) Custom(field string, fn func(string) bool, value string, message string) *Validator {
-	if _, exists := v.errors[field]; !exists && !fn(value) {
-		v.errors[field] = message
+	if !fn(value) {
+		v.addError(field, message)
 	}
 	return v
 }
@@ -200,8 +237,8 @@ func (v *Validator) Custom(field string, fn func(string) bool, value string, mes
 //
 //	v.In("role", role, "admin", "user", "guest")
 func (v *Validator) In(field, value string, allowed ...string) *Validator {
-	if _, exists := v.errors[field]; !exists && !slices.Contains(allowed, value) {
-		v.errors[field] = field + " memiliki nilai yang tidak valid"
+	if !slices.Contains(allowed, value) {
+		v.addError(field, field+" memiliki nilai yang tidak valid")
 	}
 	return v
 }
@@ -221,8 +258,8 @@ func (v *Validator) In(field, value string, allowed ...string) *Validator {
 //
 //	v.NumRange("age", age, 18, 120)
 func (v *Validator) NumRange(field string, value, min, max int) *Validator {
-	if _, exists := v.errors[field]; !exists && (value < min || value > max) {
-		v.errors[field] = field + " harus antara " + string(rune(min)) + " dan " + string(rune(max))
+	if value < min || value > max {
+		v.addError(field, field+" harus antara "+string(rune(min))+" dan "+string(rune(max)))
 	}
 	return v
 }
@@ -243,8 +280,8 @@ func (v *Validator) NumRange(field string, value, min, max int) *Validator {
 //
 //	v.Matches("password", password, "password_confirmation", passwordConfirm)
 func (v *Validator) Matches(field, value, otherField, otherValue string) *Validator {
-	if _, exists := v.errors[field]; !exists && value != otherValue {
-		v.errors[field] = field + " tidak cocok dengan " + otherField
+	if value != otherValue {
+		v.addError(field, field+" tidak cocok dengan "+otherField)
 	}
 	return v
 }
@@ -264,7 +301,6 @@ func (v *Validator) IsValid() bool {
 }
 
 // Errors mengembalikan semua validation error messages sebagai string slice.
-// Setiap field maksimal memiliki satu error message (first error wins).
 //
 // Returns:
 //   - []string: slice dari error messages, empty jika tidak ada errors
@@ -272,36 +308,44 @@ func (v *Validator) IsValid() bool {
 // Example:
 //
 //	if !v.IsValid() {
-//	  errors := v.Errors()
-//	  for _, err := range errors {
+//	  for _, err := range v.Errors() {
 //	    fmt.Println(err)
 //	  }
 //	}
 func (v *Validator) Errors() []string {
 	var result []string
-	for _, msg := range v.errors {
-		result = append(result, msg)
+	for _, msgs := range v.errors {
+		result = append(result, msgs...)
 	}
 	return result
 }
 
-// ErrorMap mengembalikan validation errors sebagai map[field]error_message.
-// Cocok untuk API responses untuk return field-specific errors.
+// ErrorMap mengembalikan validation errors sebagai FieldErrors.
+// Single error per field di-return sebagai string, multiple errors sebagai []string.
+// Cocok untuk langsung di-assign ke AppError.Errors atau di-pass ke JsonError.
 //
 // Returns:
-//   - map[string]string: map dari field name ke error message
+//   - FieldErrors: map dari field name ke error message (string atau []string)
 //
 // Example:
 //
 //	if !v.IsValid() {
-//	  return c.JSON(400, v.ErrorMap())
+//	  dim.BadRequest(w, "Validasi gagal", v.ErrorMap())
 //	}
-func (v *Validator) ErrorMap() map[string]string {
-	return v.errors
+func (v *Validator) ErrorMap() FieldErrors {
+	fe := make(FieldErrors, len(v.errors))
+	for field, msgs := range v.errors {
+		if len(msgs) == 1 {
+			fe[field] = msgs[0]
+		} else {
+			fe[field] = msgs
+		}
+	}
+	return fe
 }
 
 // AddError menambahkan custom error untuk field tertentu.
-// Jika field sudah ada error, skip (first error wins).
+// Mengikuti mode aktif: first-error-wins atau accumulate.
 //
 // Parameters:
 //   - field: nama field untuk error
@@ -314,9 +358,7 @@ func (v *Validator) ErrorMap() map[string]string {
 //
 //	v.AddError("email", "Email sudah terdaftar")
 func (v *Validator) AddError(field, message string) *Validator {
-	if _, exists := v.errors[field]; !exists {
-		v.errors[field] = message
-	}
+	v.addError(field, message)
 	return v
 }
 
@@ -348,17 +390,16 @@ func (v *Validator) ErrorCount() int {
 //	  return "Email tidak valid"
 //	}
 func (v *Validator) HasError(field string) bool {
-	_, exists := v.errors[field]
-	return exists
+	return len(v.errors[field]) > 0
 }
 
-// GetError mengembalikan error message untuk field tertentu.
+// GetError mengembalikan error message pertama untuk field tertentu.
 //
 // Parameters:
 //   - field: nama field yang akan diambil error-nya
 //
 // Returns:
-//   - string: error message untuk field, empty string jika tidak ada error
+//   - string: error message pertama untuk field, empty string jika tidak ada error
 //
 // Example:
 //
@@ -367,7 +408,10 @@ func (v *Validator) HasError(field string) bool {
 //	  return errMsg
 //	}
 func (v *Validator) GetError(field string) string {
-	return v.errors[field]
+	if msgs := v.errors[field]; len(msgs) > 0 {
+		return msgs[0]
+	}
+	return ""
 }
 
 // OptionalEmail memvalidasi email format hanya jika field present dan valid.

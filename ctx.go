@@ -80,7 +80,7 @@ func (c *Ctx) NoContent() error {
 	return NoContent(c.w)
 }
 
-func (c *Ctx) BadRequest(message string, errors map[string]string) error {
+func (c *Ctx) BadRequest(message string, errors FieldErrors) error {
 	return BadRequest(c.w, message, errors)
 }
 
@@ -96,7 +96,7 @@ func (c *Ctx) NotFound(message string) error {
 	return NotFound(c.w, message)
 }
 
-func (c *Ctx) Conflict(message string, errors map[string]string) error {
+func (c *Ctx) Conflict(message string, errors FieldErrors) error {
 	return Conflict(c.w, message, errors)
 }
 

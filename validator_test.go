@@ -1,6 +1,8 @@
 package dim
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -437,4 +439,71 @@ func TestOptionalIn(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithFullErrors(t *testing.T) {
+	t.Run("default first-error-wins", func(t *testing.T) {
+		v := NewValidator().
+			Required("email", "").
+			Email("email", "")
+		fe := v.ErrorMap()
+		if msg, ok := fe["email"].(string); !ok || msg != "email wajib diisi" {
+			t.Errorf("expected single string, got %T: %v", fe["email"], fe["email"])
+		}
+	})
+
+	t.Run("WithFullErrors di akhir — berlaku setelah dipanggil", func(t *testing.T) {
+		// Required gagal → error pertama tersimpan (mode masih first-error-wins)
+		// WithFullErrors() dipanggil → mode berubah
+		// Email() dipanggil setelah WithFullErrors → accumulate
+		v := NewValidator().
+			Required("email", "").
+			WithFullErrors().
+			Email("email", "")
+		fe := v.ErrorMap()
+		msgs, ok := fe["email"].([]string)
+		if !ok {
+			t.Fatalf("expected []string, got %T: %v", fe["email"], fe["email"])
+		}
+		if len(msgs) != 2 {
+			t.Errorf("expected 2 errors, got %d: %v", len(msgs), msgs)
+		}
+	})
+
+	t.Run("WithFullErrors di awal — accumulate semua", func(t *testing.T) {
+		v := NewValidator().
+			WithFullErrors().
+			Required("email", "").
+			Email("email", "")
+		fe := v.ErrorMap()
+		msgs, ok := fe["email"].([]string)
+		if !ok {
+			t.Fatalf("expected []string, got %T: %v", fe["email"], fe["email"])
+		}
+		if len(msgs) != 2 {
+			t.Errorf("expected 2 errors, got %d: %v", len(msgs), msgs)
+		}
+	})
+
+	t.Run("single error tetap string", func(t *testing.T) {
+		v := NewValidator().
+			WithFullErrors().
+			Required("email", "")
+		fe := v.ErrorMap()
+		if _, ok := fe["email"].(string); !ok {
+			t.Errorf("single error should be string, got %T", fe["email"])
+		}
+	})
+
+	t.Run("ErrorMap langsung ke BadRequest", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		v := NewValidator().
+			Required("email", "").
+			Email("email", "").
+			WithFullErrors()
+		BadRequest(w, "Validasi gagal", v.ErrorMap())
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", w.Code)
+		}
+	})
 }

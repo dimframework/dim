@@ -55,9 +55,9 @@ Struktur error utama yang digunakan di seluruh framework.
 
 ```go
 type AppError struct {
-    Message    string            // Pesan error yang aman untuk ditampilkan ke pengguna.
-    StatusCode int               // Kode status HTTP yang sesuai (misalnya, 400, 404, 500).
-    Errors     map[string]string // Opsional: Error per-field untuk validasi.
+    Message    string      // Pesan error yang aman untuk ditampilkan ke pengguna.
+    StatusCode int         // Kode status HTTP yang sesuai (misalnya, 400, 404, 500).
+    Errors     FieldErrors // Opsional: field-level errors. Mendukung string dan []string per field.
 }
 ```
 
@@ -198,10 +198,47 @@ v.Email("email", email)
 v.Required("password", password)
 
 if !v.IsValid() {
-    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.Errors())
+    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.ErrorMap())
     return
 }
 ```
+
+### Multiple Errors per Field
+
+Satu field bisa memiliki lebih dari satu error message — via `FieldErrors` dengan `[]string`, atau via `Validator.WithFullErrors()`:
+
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Invalid format", "Already taken"],
+    "password": "Too weak"
+  }
+}
+```
+
+**Via `FieldErrors` langsung**:
+```go
+dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrors{
+    "email":    []string{"Invalid format", "Already taken"},
+    "password": "Too weak",
+})
+```
+
+**Via `Validator.WithFullErrors()`**:
+```go
+v := dim.NewValidator().
+    Required("email", email).
+    Email("email", email).
+    WithFullErrors()
+
+if !v.IsValid() {
+    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.ErrorMap())
+    return
+}
+```
+
+> `WithFullErrors()` bisa dipanggil di awal, tengah, atau akhir chain dan berlaku untuk validasi setelah pemanggilan.
 
 ### Error dengan Additional Info
 
@@ -216,7 +253,7 @@ if !v.IsValid() {
 
 **Handler code**:
 ```go
-dim.JsonError(w, http.StatusTooManyRequests, "Rate limit exceeded", map[string]string{
+dim.JsonError(w, http.StatusTooManyRequests, "Rate limit exceeded", dim.FieldErrors{
     "retry_after": "3600",
 })
 ```
