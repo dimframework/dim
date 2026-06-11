@@ -250,14 +250,16 @@ func TestFieldErrors_MultiplePerField(t *testing.T) {
 	})
 }
 
-func TestFieldErrorsFrom(t *testing.T) {
-	src := map[string]string{"email": "invalid", "name": "required"}
-	fe := FieldErrorsFrom(src)
-	if len(fe) != 2 || fe["email"] != "invalid" || fe["name"] != "required" {
-		t.Errorf("FieldErrorsFrom mismatch: %v", fe)
+func TestFieldErrors_ValidatorIntegration(t *testing.T) {
+	v := NewValidator().
+		Required("email", "").
+		Required("name", "")
+	fe := v.ErrorMap()
+	if len(fe) != 2 {
+		t.Errorf("expected 2 fields, got %d", len(fe))
 	}
-	if got := FieldErrorsFrom(nil); got != nil {
-		t.Error("expected nil for nil input")
+	if fe["email"] != "email wajib diisi" {
+		t.Errorf("email error mismatch: %v", fe["email"])
 	}
 }
 

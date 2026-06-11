@@ -14,24 +14,6 @@ import "fmt"
 //	FieldErrors{"email": []string{"invalid format", "already taken"}}
 type FieldErrors map[string]any
 
-// FieldErrorsFrom mengkonversi map[string]string ke FieldErrors.
-// Berguna untuk integrasi dengan Validator.ErrorMap() dan FilterParser.Errors().
-//
-// Example:
-//
-//	v := NewValidator().Required("email", email).Email("email", email)
-//	err.Errors = FieldErrorsFrom(v.ErrorMap())
-func FieldErrorsFrom(m map[string]string) FieldErrors {
-	if m == nil {
-		return nil
-	}
-	fe := make(FieldErrors, len(m))
-	for k, v := range m {
-		fe[k] = v
-	}
-	return fe
-}
-
 // AppError represents an application error with optional field-specific validation errors
 type AppError struct {
 	Message    string      `json:"message"`

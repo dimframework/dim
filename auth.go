@@ -269,7 +269,7 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) (s
 
 	if !v.IsValid() {
 		err := NewAppError("Validasi gagal", 400)
-		err.Errors = FieldErrorsFrom(v.ErrorMap())
+		err.Errors = v.ErrorMap()
 		return "", err
 	}
 
@@ -310,7 +310,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetTokenStr, newPassw
 
 	if !v.IsValid() {
 		err := NewAppError("Validasi gagal", 400)
-		err.Errors = FieldErrorsFrom(v.ErrorMap())
+		err.Errors = v.ErrorMap()
 		return err
 	}
 
