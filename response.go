@@ -22,8 +22,8 @@ type PaginationResponse struct {
 
 // ErrorResponse is the response structure for error responses
 type ErrorResponse struct {
-	Message string            `json:"message"`
-	Errors  map[string]string `json:"errors,omitempty"`
+	Message string      `json:"message"`
+	Errors  FieldErrors `json:"errors,omitempty"`
 }
 
 // Json menulis JSON response dengan status code dan data yang diberikan.
@@ -96,11 +96,11 @@ func JsonPagination(w http.ResponseWriter, status int, data interface{}, meta Pa
 //
 // Example:
 //
-//	JsonError(w, 400, "Validasi gagal", map[string]string{
+//	JsonError(w, 400, "Validasi gagal", FieldErrors{
 //	  "email": "Email harus valid",
-//	  "password": "Password minimal 8 karakter",
+//	  "password": []string{"minimal 8 karakter", "butuh angka"},
 //	})
-func JsonError(w http.ResponseWriter, status int, message string, errors map[string]string) error {
+func JsonError(w http.ResponseWriter, status int, message string, errors FieldErrors) error {
 	response := ErrorResponse{
 		Message: message,
 		Errors:  errors,
@@ -288,10 +288,10 @@ func OK(w http.ResponseWriter, data interface{}) error {
 //
 // Example:
 //
-//	BadRequest(w, "Validasi gagal", map[string]string{
+//	BadRequest(w, "Validasi gagal", FieldErrors{
 //	  "email": "Email tidak valid",
 //	})
-func BadRequest(w http.ResponseWriter, message string, errors map[string]string) error {
+func BadRequest(w http.ResponseWriter, message string, errors FieldErrors) error {
 	return JsonError(w, http.StatusBadRequest, message, errors)
 }
 
@@ -359,10 +359,10 @@ func NotFound(w http.ResponseWriter, message string) error {
 //
 // Example:
 //
-//	Conflict(w, "Email sudah terdaftar", map[string]string{
+//	Conflict(w, "Email sudah terdaftar", FieldErrors{
 //	  "email": "Email ini sudah digunakan oleh pengguna lain",
 //	})
-func Conflict(w http.ResponseWriter, message string, errors map[string]string) error {
+func Conflict(w http.ResponseWriter, message string, errors FieldErrors) error {
 	return JsonError(w, http.StatusConflict, message, errors)
 }
 

@@ -81,7 +81,7 @@ func TestJsonPagination(t *testing.T) {
 
 func TestJsonError(t *testing.T) {
 	w := httptest.NewRecorder()
-	errors := map[string]string{
+	errors := FieldErrors{
 		"email":    "invalid email",
 		"password": "too weak",
 	}
@@ -201,10 +201,70 @@ func TestOK(t *testing.T) {
 	}
 }
 
+func TestFieldErrors_MultiplePerField(t *testing.T) {
+	t.Run("single error serializes as string", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		JsonError(w, http.StatusBadRequest, "validation failed", FieldErrors{
+			"email": "invalid format",
+		})
+		var raw map[string]any
+		json.Unmarshal(w.Body.Bytes(), &raw)
+		errs := raw["errors"].(map[string]any)
+		if errs["email"] != "invalid format" {
+			t.Errorf("expected string, got %T: %v", errs["email"], errs["email"])
+		}
+	})
+
+	t.Run("multiple errors serialize as array", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		JsonError(w, http.StatusBadRequest, "validation failed", FieldErrors{
+			"email": []string{"invalid format", "already taken"},
+		})
+		var raw map[string]any
+		json.Unmarshal(w.Body.Bytes(), &raw)
+		errs := raw["errors"].(map[string]any)
+		emailErrs, ok := errs["email"].([]any)
+		if !ok {
+			t.Fatalf("expected array, got %T", errs["email"])
+		}
+		if len(emailErrs) != 2 {
+			t.Errorf("expected 2 errors, got %d", len(emailErrs))
+		}
+	})
+
+	t.Run("mixed single and multi in same response", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		JsonError(w, http.StatusBadRequest, "validation failed", FieldErrors{
+			"email":    []string{"invalid format", "already taken"},
+			"password": "too weak",
+		})
+		var raw map[string]any
+		json.Unmarshal(w.Body.Bytes(), &raw)
+		errs := raw["errors"].(map[string]any)
+		if _, ok := errs["email"].([]any); !ok {
+			t.Errorf("email should be array, got %T", errs["email"])
+		}
+		if errs["password"] != "too weak" {
+			t.Errorf("password should be string")
+		}
+	})
+}
+
+func TestFieldErrorsFrom(t *testing.T) {
+	src := map[string]string{"email": "invalid", "name": "required"}
+	fe := FieldErrorsFrom(src)
+	if len(fe) != 2 || fe["email"] != "invalid" || fe["name"] != "required" {
+		t.Errorf("FieldErrorsFrom mismatch: %v", fe)
+	}
+	if got := FieldErrorsFrom(nil); got != nil {
+		t.Error("expected nil for nil input")
+	}
+}
+
 func TestShorthandErrors(t *testing.T) {
 	tests := []struct {
 		name    string
-		fn      func(http.ResponseWriter, string, map[string]string) error
+		fn      func(http.ResponseWriter, string, FieldErrors) error
 		status  int
 		message string
 	}{

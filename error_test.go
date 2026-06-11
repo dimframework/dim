@@ -54,7 +54,7 @@ func TestWithFieldError(t *testing.T) {
 
 func TestWithFieldErrors(t *testing.T) {
 	err := NewAppError("validation failed", 400)
-	fieldErrors := map[string]string{
+	fieldErrors := FieldErrors{
 		"email":    "invalid email format",
 		"password": "password too weak",
 	}

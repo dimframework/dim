@@ -2,11 +2,41 @@ package dim
 
 import "fmt"
 
+// FieldErrors adalah tipe untuk field-level error messages.
+// Mendukung single error (string) dan multiple errors ([]string) per field.
+//
+// Single error:
+//
+//	FieldErrors{"email": "invalid format"}
+//
+// Multiple errors:
+//
+//	FieldErrors{"email": []string{"invalid format", "already taken"}}
+type FieldErrors map[string]any
+
+// FieldErrorsFrom mengkonversi map[string]string ke FieldErrors.
+// Berguna untuk integrasi dengan Validator.ErrorMap() dan FilterParser.Errors().
+//
+// Example:
+//
+//	v := NewValidator().Required("email", email).Email("email", email)
+//	err.Errors = FieldErrorsFrom(v.ErrorMap())
+func FieldErrorsFrom(m map[string]string) FieldErrors {
+	if m == nil {
+		return nil
+	}
+	fe := make(FieldErrors, len(m))
+	for k, v := range m {
+		fe[k] = v
+	}
+	return fe
+}
+
 // AppError represents an application error with optional field-specific validation errors
 type AppError struct {
-	Message    string            `json:"message"`
-	StatusCode int               `json:"-"`
-	Errors     map[string]string `json:"errors,omitempty"`
+	Message    string      `json:"message"`
+	StatusCode int         `json:"-"`
+	Errors     FieldErrors `json:"errors,omitempty"`
 }
 
 // Error mengimplementasikan error interface.
@@ -48,7 +78,7 @@ func NewAppError(message string, statusCode int) *AppError {
 	return &AppError{
 		Message:    message,
 		StatusCode: statusCode,
-		Errors:     make(map[string]string),
+		Errors:     make(FieldErrors),
 	}
 }
 
@@ -71,7 +101,7 @@ func NewAppError(message string, statusCode int) *AppError {
 //	  WithFieldError("password", "Password minimal 8 karakter")
 func (e *AppError) WithFieldError(field, message string) *AppError {
 	if e.Errors == nil {
-		e.Errors = make(map[string]string)
+		e.Errors = make(FieldErrors)
 	}
 	e.Errors[field] = message
 	return e
@@ -83,7 +113,7 @@ func (e *AppError) WithFieldError(field, message string) *AppError {
 // Jika fields sudah ada, akan overwrite dengan messages baru.
 //
 // Parameters:
-//   - errors: map[string]string dari field names ke error messages
+//   - errors: FieldErrors dari field names ke error messages
 //
 // Returns:
 //   - *AppError: pointer to AppError untuk method chaining
@@ -91,13 +121,13 @@ func (e *AppError) WithFieldError(field, message string) *AppError {
 // Example:
 //
 //	appErr := NewAppError("Validasi gagal", 400).
-//	  WithFieldErrors(map[string]string{
+//	  WithFieldErrors(FieldErrors{
 //	    "email": "Email harus valid",
-//	    "password": "Password minimal 8 karakter",
+//	    "password": []string{"minimal 8 karakter", "butuh angka"},
 //	  })
-func (e *AppError) WithFieldErrors(errors map[string]string) *AppError {
+func (e *AppError) WithFieldErrors(errors FieldErrors) *AppError {
 	if e.Errors == nil {
-		e.Errors = make(map[string]string)
+		e.Errors = make(FieldErrors)
 	}
 	for field, message := range errors {
 		e.Errors[field] = message

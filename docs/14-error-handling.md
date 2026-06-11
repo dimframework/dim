@@ -55,9 +55,9 @@ Struktur error utama yang digunakan di seluruh framework.
 
 ```go
 type AppError struct {
-    Message    string            // Pesan error yang aman untuk ditampilkan ke pengguna.
-    StatusCode int               // Kode status HTTP yang sesuai (misalnya, 400, 404, 500).
-    Errors     map[string]string // Opsional: Error per-field untuk validasi.
+    Message    string      // Pesan error yang aman untuk ditampilkan ke pengguna.
+    StatusCode int         // Kode status HTTP yang sesuai (misalnya, 400, 404, 500).
+    Errors     FieldErrors // Opsional: field-level errors. Mendukung string dan []string per field.
 }
 ```
 
@@ -198,9 +198,31 @@ v.Email("email", email)
 v.Required("password", password)
 
 if !v.IsValid() {
-    dim.JsonError(w, http.StatusBadRequest, "Validation failed", v.Errors())
+    dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrorsFrom(v.ErrorMap()))
     return
 }
+```
+
+### Multiple Errors per Field
+
+Satu field bisa memiliki lebih dari satu error message menggunakan `[]string`:
+
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Invalid format", "Already taken"],
+    "password": "Too weak"
+  }
+}
+```
+
+**Handler code**:
+```go
+dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrors{
+    "email":    []string{"Invalid format", "Already taken"},
+    "password": "Too weak",
+})
 ```
 
 ### Error dengan Additional Info

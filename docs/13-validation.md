@@ -20,7 +20,7 @@ Pelajari cara melakukan validasi input dengan validator framework dim.
 
 ### Filosofi Validasi di dim
 
-Framework dim menggunakan model **single-error-per-field**:
+Validator di framework dim menggunakan model **single-error-per-field** (first-error-wins):
 
 ```json
 {
@@ -32,14 +32,22 @@ Framework dim menggunakan model **single-error-per-field**:
 }
 ```
 
-Bukan multiple errors per field:
+Untuk kasus yang membutuhkan **multiple errors per field**, gunakan `FieldErrors` dengan `[]string`:
+
+```go
+dim.JsonError(w, http.StatusBadRequest, "Validation failed", dim.FieldErrors{
+    "email":    []string{"Invalid format", "Already taken"},
+    "password": "Too weak",
+})
+```
+
+Output JSON:
 ```json
 {
+  "message": "Validation failed",
   "errors": {
-    "email": [
-      "Email is required",
-      "Invalid email format"
-    ]
+    "email": ["Invalid format", "Already taken"],
+    "password": "Too weak"
   }
 }
 ```

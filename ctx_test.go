@@ -234,7 +234,7 @@ func TestCtx_NoContent(t *testing.T) {
 func TestCtx_BadRequest(t *testing.T) {
 	w, r := newCtxRequest(http.MethodPost, "/", "")
 	c := Of(w, r)
-	c.BadRequest("invalid", map[string]string{"field": "required"})
+	c.BadRequest("invalid", FieldErrors{"field": "required"})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("BadRequest status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
@@ -274,7 +274,7 @@ func TestCtx_NotFound(t *testing.T) {
 func TestCtx_Conflict(t *testing.T) {
 	w, r := newCtxRequest(http.MethodPost, "/", "")
 	c := Of(w, r)
-	c.Conflict("conflict", map[string]string{"email": "taken"})
+	c.Conflict("conflict", FieldErrors{"email": "taken"})
 	if w.Code != http.StatusConflict {
 		t.Errorf("Conflict status = %d, want %d", w.Code, http.StatusConflict)
 	}

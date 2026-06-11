@@ -129,6 +129,8 @@ dim.JsonPagination(w, http.StatusOK, users, meta)
 
 ### Error Response
 
+#### Single error per field
+
 ```json
 {
   "message": "Validation failed",
@@ -141,9 +143,30 @@ dim.JsonPagination(w, http.StatusOK, users, meta)
 
 **Handler**:
 ```go
-dim.JsonError(w, http.StatusBadRequest, "Validation failed", 
-    map[string]string{
-        "email": "Invalid email format",
+dim.JsonError(w, http.StatusBadRequest, "Validation failed",
+    dim.FieldErrors{
+        "email":    "Invalid email format",
+        "password": "Too weak",
+    })
+```
+
+#### Multiple errors per field
+
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Invalid format", "Already taken"],
+    "password": "Too weak"
+  }
+}
+```
+
+**Handler**:
+```go
+dim.JsonError(w, http.StatusBadRequest, "Validation failed",
+    dim.FieldErrors{
+        "email":    []string{"Invalid format", "Already taken"},
         "password": "Too weak",
     })
 ```
@@ -332,14 +355,14 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 ### JsonError Signature
 
 ```go
-func JsonError(w http.ResponseWriter, status int, message string, errors map[string]string)
+func JsonError(w http.ResponseWriter, status int, message string, errors FieldErrors)
 ```
 
 **Parameters**:
 - `w http.ResponseWriter` - HTTP response writer
 - `status int` - HTTP status code
 - `message string` - Error message untuk user
-- `errors map[string]string` - Optional field-level errors (nil jika tidak ada)
+- `errors FieldErrors` - Optional field-level errors. Nilai per field bisa `string` (single) atau `[]string` (multiple)
 
 ---
 
@@ -381,17 +404,24 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 -   **`NotFound(w, message)`**: Mengirim response 404 Not Found.
 -   **`Conflict(w, message, errors)`**: Mengirim response 409 Conflict.
 -   **`InternalServerError(w, message)`**: Mengirim response 500 Internal Server Error.
--   **`JsonAppError(w, appErr)`**: Mengurai `*AppError` dan mengirim `JsonError` yang sesuai.
+-   **`JsonAppError(w, appErr)`**: Mengurai `*AppError` dan mengirim response yang sesuai.
 
 ```go
-// Validasi gagal
+// Validasi gagal — single error per field
 func createUser(w http.ResponseWriter, r *http.Request) {
     v := dim.NewValidator()
     v.Required("email", req.Email)
     if !v.IsValid() {
-        dim.BadRequest(w, "Validasi gagal", v.ErrorMap()) // HTTP 400
+        dim.BadRequest(w, "Validasi gagal", dim.FieldErrorsFrom(v.ErrorMap())) // HTTP 400
         return
     }
+}
+
+// Validasi gagal — multiple errors per field
+func createUser(w http.ResponseWriter, r *http.Request) {
+    dim.BadRequest(w, "Validasi gagal", dim.FieldErrors{
+        "email": []string{"tidak valid", "sudah terdaftar"},
+    })
 }
 
 // Resource tidak ditemukan
