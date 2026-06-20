@@ -287,6 +287,26 @@ func (db *PostgresDatabase) Close() error {
 	return nil
 }
 
+// WritePool mengembalikan write connection pool yang mendasari untuk penggunaan lanjutan,
+// misalnya mengintegrasikan pustaka yang membutuhkan *pgxpool.Pool secara langsung
+// (job queue seperti River, LISTEN/NOTIFY broker, dsb.).
+// Mengikuti pola escape-hatch yang sama dengan PostgresTx.PgxTx().
+//
+// Catatan: consumer tidak boleh memanggil pool.Close() — lifecycle pool dikelola oleh
+// PostgresDatabase dan ditutup melalui Close().
+func (db *PostgresDatabase) WritePool() *pgxpool.Pool {
+	return db.writePool
+}
+
+// ReadPools mengembalikan read connection pools yang mendasari (read replicas).
+// Fallback ke slice satu elemen berisi write pool apabila tidak ada read host yang dikonfigurasi.
+//
+// Catatan: consumer tidak boleh memanggil pool.Close() — lifecycle pool dikelola oleh
+// PostgresDatabase dan ditutup melalui Close().
+func (db *PostgresDatabase) ReadPools() []*pgxpool.Pool {
+	return db.readPools
+}
+
 // DriverName returns the driver name
 func (db *PostgresDatabase) DriverName() string {
 	return "postgres"

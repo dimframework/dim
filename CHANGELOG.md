@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.2] - 2026-06-20
+
+### Added
+- **`PostgresDatabase.WritePool()` dan `ReadPools()` accessors**: Mengekspos `*pgxpool.Pool` yang mendasari `PostgresDatabase` untuk integrasi lanjutan — memungkinkan penggunaan pustaka yang membutuhkan akses `pgx` langsung seperti job queue (`riverqueue/river`) dan `LISTEN/NOTIFY` broker. Konsisten dengan pola escape-hatch `PostgresTx.PgxTx()` yang sudah ada. Interface `Database` tidak berubah; accessor hanya tersedia di tipe konkret `*PostgresDatabase` dan diakses via type assertion. Closes [#8](https://github.com/dimframework/dim/issues/8).
+
+---
+
 ## [v0.7.1] - 2026-06-11
 
 ### Changed

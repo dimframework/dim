@@ -2,9 +2,59 @@ package dim
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 )
+
+// newTestPostgresDB creates a PostgresDatabase from env vars, or skips the test.
+func newTestPostgresDB(t *testing.T) *PostgresDatabase {
+	t.Helper()
+	host := os.Getenv("TEST_PG_HOST")
+	if host == "" {
+		t.Skip("TEST_PG_HOST not set — skipping Postgres integration test")
+	}
+	cfg := DatabaseConfig{
+		Driver:    "postgres",
+		WriteHost: host,
+		Port:      5432,
+		Database:  os.Getenv("TEST_PG_DB"),
+		Username:  os.Getenv("TEST_PG_USER"),
+		Password:  os.Getenv("TEST_PG_PASS"),
+		SSLMode:   "disable",
+		MaxConns:  2,
+	}
+	db, err := NewPostgresDatabase(cfg)
+	if err != nil {
+		t.Fatalf("NewPostgresDatabase: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func TestPostgresDatabase_WritePool(t *testing.T) {
+	db := newTestPostgresDB(t)
+	pool := db.WritePool()
+	if pool == nil {
+		t.Fatal("WritePool() returned nil")
+	}
+	if _, err := pool.Exec(context.Background(), "SELECT 1"); err != nil {
+		t.Fatalf("WritePool Exec SELECT 1: %v", err)
+	}
+}
+
+func TestPostgresDatabase_ReadPools(t *testing.T) {
+	db := newTestPostgresDB(t)
+	pools := db.ReadPools()
+	if len(pools) < 1 {
+		t.Fatal("ReadPools() returned empty slice")
+	}
+	for i, pool := range pools {
+		if pool == nil {
+			t.Fatalf("ReadPools()[%d] is nil", i)
+		}
+	}
+}
 
 func TestPostgresDatabase_Logic(t *testing.T) {
 	// Kita buat instance kosong hanya untuk test logic Rebind dan DriverName
