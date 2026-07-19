@@ -366,6 +366,63 @@ func Conflict(w http.ResponseWriter, message string, errors FieldErrors) error {
 	return JsonError(w, http.StatusConflict, message, errors)
 }
 
+// MethodNotAllowed menulis 405 Method Not Allowed error response.
+// Berguna ketika endpoint ada tetapi HTTP method yang digunakan tidak didukung.
+//
+// Parameters:
+//   - w: http.ResponseWriter untuk menulis response
+//   - message: error message
+//
+// Returns:
+//   - error: error jika encoding JSON gagal
+//
+// Example:
+//
+//	MethodNotAllowed(w, "Method tidak diizinkan untuk endpoint ini")
+func MethodNotAllowed(w http.ResponseWriter, message string) error {
+	return JsonError(w, http.StatusMethodNotAllowed, message, nil)
+}
+
+// Gone menulis 410 Gone error response.
+// Berguna untuk resource yang sebelumnya ada tetapi sudah dihapus secara permanen
+// atau sudah tidak berlaku (contoh: one-time link/token yang sudah expired).
+//
+// Parameters:
+//   - w: http.ResponseWriter untuk menulis response
+//   - message: error message
+//
+// Returns:
+//   - error: error jika encoding JSON gagal
+//
+// Example:
+//
+//	Gone(w, "Link konfirmasi telah expired")
+func Gone(w http.ResponseWriter, message string) error {
+	return JsonError(w, http.StatusGone, message, nil)
+}
+
+// UnprocessableEntity menulis 422 Unprocessable Entity error response.
+// Berguna untuk request yang well-formed secara sintaktik tetapi melanggar
+// aturan domain/bisnis (semantically invalid). Berbeda dari 400 (malformed)
+// dan 409 (state conflict).
+//
+// Parameters:
+//   - w: http.ResponseWriter untuk menulis response
+//   - message: error message
+//   - errors: optional map dari field names ke error messages untuk domain errors
+//
+// Returns:
+//   - error: error jika encoding JSON gagal
+//
+// Example:
+//
+//	UnprocessableEntity(w, "Aturan bisnis dilanggar", FieldErrors{
+//	  "slot": "Slot di luar ketersediaan fasilitator",
+//	})
+func UnprocessableEntity(w http.ResponseWriter, message string, errors FieldErrors) error {
+	return JsonError(w, http.StatusUnprocessableEntity, message, errors)
+}
+
 // InternalServerError menulis 500 Internal Server Error response.
 // Berguna untuk unexpected server errors.
 // Jangan expose detailed error information ke client untuk security.
@@ -382,6 +439,24 @@ func Conflict(w http.ResponseWriter, message string, errors FieldErrors) error {
 //	InternalServerError(w, "Terjadi kesalahan pada server")
 func InternalServerError(w http.ResponseWriter, message string) error {
 	return JsonError(w, http.StatusInternalServerError, message, nil)
+}
+
+// ServiceUnavailable menulis 503 Service Unavailable response.
+// Berguna ketika server tidak dapat menangani request sementara waktu,
+// misalnya karena database tidak tersedia atau mode maintenance.
+//
+// Parameters:
+//   - w: http.ResponseWriter untuk menulis response
+//   - message: error message yang aman untuk dikirim ke client
+//
+// Returns:
+//   - error: error jika encoding JSON gagal
+//
+// Example:
+//
+//	ServiceUnavailable(w, "Layanan sedang dalam pemeliharaan")
+func ServiceUnavailable(w http.ResponseWriter, message string) error {
+	return JsonError(w, http.StatusServiceUnavailable, message, nil)
 }
 
 // TooManyRequests menulis 429 Too Many Requests response.

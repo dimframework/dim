@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`Gone(w, message)`** / **`Ctx.Gone(message)`**: Mengirim response 410 Gone. Berguna untuk resource yang sudah tidak berlaku secara permanen seperti one-time link/token yang sudah expired. Closes [#10](https://github.com/dimframework/dim/issues/10).
+- **`UnprocessableEntity(w, message, errors)`** / **`Ctx.UnprocessableEntity(message, errors)`**: Mengirim response 422 Unprocessable Entity. Berguna untuk request yang valid secara sintaktik tetapi melanggar aturan domain/bisnis (semantically invalid) — berbeda dari 400 (malformed) dan 409 (state conflict). Closes [#10](https://github.com/dimframework/dim/issues/10).
+- **`MethodNotAllowed(w, message)`** / **`Ctx.MethodNotAllowed(message)`**: Mengirim response 405 Method Not Allowed. Berguna ketika endpoint ada tetapi HTTP method yang digunakan tidak didukung.
+- **`ServiceUnavailable(w, message)`** / **`Ctx.ServiceUnavailable(message)`**: Mengirim response 503 Service Unavailable. Berguna ketika server tidak dapat menangani request sementara waktu, misalnya karena database tidak tersedia atau mode maintenance.
+
 ---
 
 ## [v0.7.2] - 2026-06-20

@@ -289,6 +289,62 @@ func TestCtx_InternalServerError(t *testing.T) {
 	}
 }
 
+func TestCtx_MethodNotAllowed(t *testing.T) {
+	w, r := newCtxRequest(http.MethodPost, "/", "")
+	c := Of(w, r)
+	c.MethodNotAllowed("Method tidak diizinkan")
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("MethodNotAllowed status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+	body := decodeJSON(t, w)
+	if body["message"] != "Method tidak diizinkan" {
+		t.Errorf("MethodNotAllowed message = %v", body["message"])
+	}
+}
+
+func TestCtx_Gone(t *testing.T) {
+	w, r := newCtxRequest(http.MethodGet, "/", "")
+	c := Of(w, r)
+	c.Gone("Link telah expired")
+	if w.Code != http.StatusGone {
+		t.Errorf("Gone status = %d, want %d", w.Code, http.StatusGone)
+	}
+	body := decodeJSON(t, w)
+	if body["message"] != "Link telah expired" {
+		t.Errorf("Gone message = %v", body["message"])
+	}
+}
+
+func TestCtx_UnprocessableEntity(t *testing.T) {
+	w, r := newCtxRequest(http.MethodPost, "/", "")
+	c := Of(w, r)
+	c.UnprocessableEntity("Aturan bisnis dilanggar", FieldErrors{"slot": "Di luar ketersediaan"})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("UnprocessableEntity status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+	body := decodeJSON(t, w)
+	if body["message"] != "Aturan bisnis dilanggar" {
+		t.Errorf("UnprocessableEntity message = %v", body["message"])
+	}
+	errs, _ := body["errors"].(map[string]interface{})
+	if errs["slot"] != "Di luar ketersediaan" {
+		t.Errorf("UnprocessableEntity field error = %v", errs)
+	}
+}
+
+func TestCtx_ServiceUnavailable(t *testing.T) {
+	w, r := newCtxRequest(http.MethodGet, "/", "")
+	c := Of(w, r)
+	c.ServiceUnavailable("Layanan tidak tersedia")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("ServiceUnavailable status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	body := decodeJSON(t, w)
+	if body["message"] != "Layanan tidak tersedia" {
+		t.Errorf("ServiceUnavailable message = %v", body["message"])
+	}
+}
+
 func TestCtx_TooManyRequests(t *testing.T) {
 	w, r := newCtxRequest(http.MethodGet, "/", "")
 	c := Of(w, r)

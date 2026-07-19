@@ -401,8 +401,12 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 -   **`Unauthorized(w, message)`**: Mengirim response 401 Unauthorized.
 -   **`Forbidden(w, message)`**: Mengirim response 403 Forbidden.
 -   **`NotFound(w, message)`**: Mengirim response 404 Not Found.
+-   **`MethodNotAllowed(w, message)`**: Mengirim response 405 Method Not Allowed.
 -   **`Conflict(w, message, errors)`**: Mengirim response 409 Conflict.
+-   **`Gone(w, message)`**: Mengirim response 410 Gone untuk resource yang sudah tidak berlaku.
+-   **`UnprocessableEntity(w, message, errors)`**: Mengirim response 422 Unprocessable Entity untuk pelanggaran aturan domain/bisnis.
 -   **`InternalServerError(w, message)`**: Mengirim response 500 Internal Server Error.
+-   **`ServiceUnavailable(w, message)`**: Mengirim response 503 Service Unavailable.
 -   **`JsonAppError(w, appErr)`**: Mengurai `*AppError` dan mengirim response yang sesuai.
 
 ```go
@@ -543,9 +547,13 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 | `c.Unauthorized(msg)` | 401 | Autentikasi diperlukan |
 | `c.Forbidden(msg)` | 403 | Tidak punya permission |
 | `c.NotFound(msg)` | 404 | Resource tidak ditemukan |
+| `c.MethodNotAllowed(msg)` | 405 | HTTP method tidak didukung |
 | `c.Conflict(msg, errs)` | 409 | Duplikat atau state conflict |
-| `c.InternalServerError(msg)` | 500 | Error server tidak terduga |
+| `c.Gone(msg)` | 410 | Resource sudah tidak berlaku/expired |
+| `c.UnprocessableEntity(msg, errs)` | 422 | Pelanggaran aturan domain/bisnis |
 | `c.TooManyRequests(retryAfter)` | 429 | Rate limit tercapai |
+| `c.InternalServerError(msg)` | 500 | Error server tidak terduga |
+| `c.ServiceUnavailable(msg)` | 503 | Layanan sementara tidak tersedia |
 | `c.AppError(appErr)` | varies | Kirim `*AppError` langsung |
 
 ### Contoh Lengkap — Create User
@@ -740,7 +748,10 @@ w.WriteHeader(http.StatusNoContent)
 | 401 | Unauthorized | Auth required/invalid |
 | 403 | Forbidden | Authenticated but no permission |
 | 404 | Not Found | Resource doesn't exist |
+| 405 | Method Not Allowed | HTTP method not supported |
 | 409 | Conflict | Duplicate/state conflict |
+| 410 | Gone | Resource permanently gone/expired |
+| 422 | Unprocessable Entity | Domain/business rule violation |
 | 429 | Too Many Requests | Rate limit |
 
 **Examples**:
@@ -757,8 +768,19 @@ dim.JsonError(w, http.StatusForbidden, "Access denied", nil)
 // Not found
 dim.JsonError(w, http.StatusNotFound, "User not found", nil)
 
+// Method not allowed
+dim.MethodNotAllowed(w, "Method tidak diizinkan untuk endpoint ini")
+
 // Duplicate
 dim.JsonError(w, http.StatusConflict, "Email already exists", nil)
+
+// Expired one-time link/token
+dim.Gone(w, "Link konfirmasi telah expired")
+
+// Domain/business rule violation
+dim.UnprocessableEntity(w, "Aturan bisnis dilanggar", dim.FieldErrors{
+    "slot": "Slot di luar ketersediaan fasilitator",
+})
 ```
 
 ### Server Error Codes (5xx)
@@ -766,15 +788,15 @@ dim.JsonError(w, http.StatusConflict, "Email already exists", nil)
 | Code | Name | Usage |
 |------|------|-------|
 | 500 | Internal Server Error | Unexpected error |
-| 503 | Service Unavailable | DB down, etc |
+| 503 | Service Unavailable | DB down, maintenance mode, etc |
 
 **Examples**:
 ```go
 // Unexpected error
-dim.JsonError(w, http.StatusInternalServerError, "Server error", nil)
+dim.InternalServerError(w, "Terjadi kesalahan pada server")
 
 // Database unavailable
-dim.JsonError(w, http.StatusServiceUnavailable, "Database unavailable", nil)
+dim.ServiceUnavailable(w, "Database unavailable")
 ```
 
 ---
