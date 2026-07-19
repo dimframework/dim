@@ -108,6 +108,22 @@ func (c *Ctx) TooManyRequests(retryAfterSeconds int) error {
 	return TooManyRequests(c.w, retryAfterSeconds)
 }
 
+func (c *Ctx) MethodNotAllowed(message string) error {
+	return MethodNotAllowed(c.w, message)
+}
+
+func (c *Ctx) Gone(message string) error {
+	return Gone(c.w, message)
+}
+
+func (c *Ctx) UnprocessableEntity(message string, errors FieldErrors) error {
+	return UnprocessableEntity(c.w, message, errors)
+}
+
+func (c *Ctx) ServiceUnavailable(message string) error {
+	return ServiceUnavailable(c.w, message)
+}
+
 func (c *Ctx) AppError(appErr *AppError) error {
 	return JsonAppError(c.w, appErr)
 }

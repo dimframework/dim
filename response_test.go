@@ -321,3 +321,85 @@ func TestInternalServerError(t *testing.T) {
 		t.Errorf("status code mismatch")
 	}
 }
+
+func TestMethodNotAllowed(t *testing.T) {
+	w := httptest.NewRecorder()
+	MethodNotAllowed(w, "Method tidak diizinkan")
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+
+	var result ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if result.Message != "Method tidak diizinkan" {
+		t.Errorf("message mismatch: %v", result.Message)
+	}
+}
+
+func TestGone(t *testing.T) {
+	w := httptest.NewRecorder()
+	Gone(w, "Link telah expired")
+
+	if w.Code != http.StatusGone {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusGone)
+	}
+
+	var result ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if result.Message != "Link telah expired" {
+		t.Errorf("message mismatch: %v", result.Message)
+	}
+}
+
+func TestUnprocessableEntity(t *testing.T) {
+	w := httptest.NewRecorder()
+	UnprocessableEntity(w, "Aturan bisnis dilanggar", FieldErrors{
+		"slot": "Slot di luar ketersediaan fasilitator",
+	})
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+
+	var result ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if result.Message != "Aturan bisnis dilanggar" {
+		t.Errorf("message mismatch: %v", result.Message)
+	}
+	if result.Errors["slot"] != "Slot di luar ketersediaan fasilitator" {
+		t.Errorf("field error mismatch: %v", result.Errors)
+	}
+}
+
+func TestUnprocessableEntityNoFields(t *testing.T) {
+	w := httptest.NewRecorder()
+	UnprocessableEntity(w, "Domain rule violated", nil)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestServiceUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	ServiceUnavailable(w, "Layanan sedang dalam pemeliharaan")
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	var result ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if result.Message != "Layanan sedang dalam pemeliharaan" {
+		t.Errorf("message mismatch: %v", result.Message)
+	}
+}
