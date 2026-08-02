@@ -110,6 +110,13 @@ type RateLimitConfig struct {
 	PerIP       int
 	PerUser     int
 	ResetPeriod time.Duration
+
+	// TrustedProxyCount adalah jumlah hop proxy tepercaya di depan aplikasi,
+	// dihitung dari kanan pada header X-Forwarded-For.
+	// 0 (default) = abaikan seluruh header proxy, pakai RemoteAddr saja (aman untuk aplikasi tanpa proxy).
+	// 1 = satu proxy tepercaya (misalnya Cloud Run, satu load balancer).
+	// Env: RATE_LIMIT_TRUSTED_PROXY_COUNT
+	TrustedProxyCount int
 }
 
 // CORSConfig holds CORS configuration
@@ -412,11 +419,17 @@ func loadRateLimitConfig() (RateLimitConfig, error) {
 		return RateLimitConfig{}, fmt.Errorf("invalid RATE_LIMIT_RESET_PERIOD: %w", err)
 	}
 
+	trustedProxyCount, err := ParseEnvInt(GetEnvOrDefault("RATE_LIMIT_TRUSTED_PROXY_COUNT", "0"))
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("invalid RATE_LIMIT_TRUSTED_PROXY_COUNT: %w", err)
+	}
+
 	return RateLimitConfig{
-		Enabled:     ParseEnvBool(GetEnvOrDefault("RATE_LIMIT_ENABLED", "true")),
-		PerIP:       perIP,
-		PerUser:     perUser,
-		ResetPeriod: resetPeriod,
+		Enabled:           ParseEnvBool(GetEnvOrDefault("RATE_LIMIT_ENABLED", "true")),
+		PerIP:             perIP,
+		PerUser:           perUser,
+		ResetPeriod:       resetPeriod,
+		TrustedProxyCount: trustedProxyCount,
 	}, nil
 }
 

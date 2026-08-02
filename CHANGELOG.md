@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **`GetClientIP` sekarang aman secara default**: Fungsi tidak lagi membaca header `X-Forwarded-For`, `X-Real-IP`, atau `X-Forwarded`. Header-header ini dapat diisi sembarang oleh klien dan tidak dapat dipercaya tanpa verifikasi proxy. Sekarang `GetClientIP` hanya menggunakan `r.RemoteAddr`. Closes [#12](https://github.com/dimframework/dim/issues/12).
+  - ⚠️ **Breaking Change**: Kode yang mengandalkan `GetClientIP` untuk membaca IP dari header proxy harus dimigrasi ke `GetClientIPWithTrustedProxies(r, n)`.
+  - `Ctx.ClientIP()` juga ikut berubah — sekarang mengembalikan `RemoteAddr`.
+- **`GetClientIPWithTrustedProxies(r, trustedProxyCount int) string`** (baru): Fungsi pengganti untuk aplikasi yang berjalan di belakang proxy tepercaya. Membaca `X-Forwarded-For` dari kanan ke kiri sebanyak `trustedProxyCount` hop — entri yang tidak ada dalam daftar proxy tepercaya tidak dapat memalsukan nilainya. Jika `trustedProxyCount <= 0`, jatuh kembali ke `RemoteAddr`.
+  - **Contoh**: `dim.GetClientIPWithTrustedProxies(r, 1)` untuk aplikasi di belakang satu load balancer (Cloud Run, nginx, dll).
+- **`RateLimitConfig.TrustedProxyCount int`** (baru): Mengatur jumlah hop proxy tepercaya untuk rate limiting berbasis IP. Default `0` = gunakan `RemoteAddr` saja. Dapat dikonfigurasi via env `RATE_LIMIT_TRUSTED_PROXY_COUNT`.
+  - **Sebelum** (rentan): `PerIP` rate limit dapat dilewati dengan mengirim header `X-Forwarded-For` sembarang.
+  - **Sekarang** (aman): Rate limit dihitung dari `RemoteAddr` secara default; set `TrustedProxyCount: 1` jika di belakang satu proxy.
+
 ### Added
 - **`Gone(w, message)`** / **`Ctx.Gone(message)`**: Mengirim response 410 Gone. Berguna untuk resource yang sudah tidak berlaku secara permanen seperti one-time link/token yang sudah expired. Closes [#10](https://github.com/dimframework/dim/issues/10).
 - **`UnprocessableEntity(w, message, errors)`** / **`Ctx.UnprocessableEntity(message, errors)`**: Mengirim response 422 Unprocessable Entity. Berguna untuk request yang valid secara sintaktik tetapi melanggar aturan domain/bisnis (semantically invalid) — berbeda dari 400 (malformed) dan 409 (state conflict). Closes [#10](https://github.com/dimframework/dim/issues/10).
