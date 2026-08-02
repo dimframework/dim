@@ -42,7 +42,7 @@ func RateLimit(config RateLimitConfig, store ...RateLimitStore) MiddlewareFunc {
 	return func(next HandlerFunc) HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-		clientIP := GetClientIPWithTrustedProxies(r, config.TrustedProxyCount)
+			clientIP := GetClientIP(r)
 
 			// Check IP rate limit
 			allowed, err := limiter.CheckIPLimit(ctx, clientIP)

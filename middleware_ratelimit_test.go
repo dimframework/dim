@@ -268,11 +268,12 @@ func TestGetClientIP(t *testing.T) {
 
 func TestGetClientIPWithTrustedProxies(t *testing.T) {
 	tests := []struct {
-		name               string
-		xff                string
-		remoteAddr         string
-		trustedProxyCount  int
-		expectedIP         string
+		name              string
+		xff               string
+		xffLines          []string // baris X-Forwarded-For terpisah (Header.Add berulang)
+		remoteAddr        string
+		trustedProxyCount int
+		expectedIP        string
 	}{
 		{
 			name:              "zero proxies falls back to RemoteAddr",
@@ -310,11 +311,13 @@ func TestGetClientIPWithTrustedProxies(t *testing.T) {
 			expectedIP:        "5.6.7.8",
 		},
 		{
-			name:              "trustedProxyCount exceeds XFF entries, clamps to leftmost",
+			// Rantai proxy lebih pendek daripada konfigurasi: entri paling kiri
+			// dikendalikan klien, jadi harus jatuh ke RemoteAddr, bukan di-clamp.
+			name:              "trustedProxyCount exceeds XFF entries, falls back to RemoteAddr",
 			xff:               "5.6.7.8",
 			remoteAddr:        "10.0.0.1:8080",
 			trustedProxyCount: 5,
-			expectedIP:        "5.6.7.8",
+			expectedIP:        "10.0.0.1",
 		},
 		{
 			name:              "no XFF header, falls back to RemoteAddr",
@@ -343,6 +346,23 @@ func TestGetClientIPWithTrustedProxies(t *testing.T) {
 			trustedProxyCount: 1,
 			expectedIP:        "::1",
 		},
+		{
+			// Klien mengirim baris X-Forwarded-For sendiri; proxy tepercaya
+			// menambahkan baris terpisah berisi IP klien yang sebenarnya.
+			// Seluruh baris harus digabungkan sebelum dibaca dari kanan.
+			name:              "spoofed XFF on a separate header line is not trusted",
+			xffLines:          []string{"6.6.6.6", "203.0.113.9"},
+			remoteAddr:        "10.0.0.1:8080",
+			trustedProxyCount: 1,
+			expectedIP:        "203.0.113.9",
+		},
+		{
+			name:              "multiple header lines counted as one chain",
+			xffLines:          []string{"6.6.6.6, 198.51.100.7", "203.0.113.9"},
+			remoteAddr:        "10.0.0.1:8080",
+			trustedProxyCount: 2,
+			expectedIP:        "198.51.100.7",
+		},
 	}
 
 	for _, tt := range tests {
@@ -350,6 +370,9 @@ func TestGetClientIPWithTrustedProxies(t *testing.T) {
 			r := httptest.NewRequest("GET", "/", nil)
 			if tt.xff != "" {
 				r.Header.Set("X-Forwarded-For", tt.xff)
+			}
+			for _, line := range tt.xffLines {
+				r.Header.Add("X-Forwarded-For", line)
 			}
 			if tt.remoteAddr != "" {
 				r.RemoteAddr = tt.remoteAddr
@@ -365,13 +388,12 @@ func TestGetClientIPWithTrustedProxies(t *testing.T) {
 
 func TestRateLimitBypassPrevention(t *testing.T) {
 	// Memastikan rate limit tidak dapat dilewati dengan memanipulasi X-Forwarded-For
-	// ketika TrustedProxyCount = 0 (default).
+	// ketika middleware ClientIP tidak dipasang (default aman: pakai RemoteAddr).
 	config := RateLimitConfig{
-		Enabled:           true,
-		PerIP:             2,
-		PerUser:           100,
-		ResetPeriod:       1 * time.Second,
-		TrustedProxyCount: 0, // Default aman: abaikan header proxy
+		Enabled:     true,
+		PerIP:       2,
+		PerUser:     100,
+		ResetPeriod: 1 * time.Second,
 	}
 
 	rateLimitMiddleware := RateLimit(config)

@@ -19,6 +19,7 @@ type Config struct {
 	RateLimit RateLimitConfig
 	CORS      CORSConfig
 	CSRF      CSRFConfig
+	ClientIP  ClientIPConfig
 }
 
 // ServerConfig holds server configuration
@@ -110,12 +111,23 @@ type RateLimitConfig struct {
 	PerIP       int
 	PerUser     int
 	ResetPeriod time.Duration
+}
 
+// ClientIPConfig mengatur cara framework menentukan IP address klien.
+//
+// Konfigurasi ini berlaku untuk seluruh aplikasi — rate limiting, logging,
+// audit trail, dan Ctx.ClientIP() semuanya membaca hasil yang sama. Nilainya
+// diterapkan melalui middleware ClientIP.
+type ClientIPConfig struct {
 	// TrustedProxyCount adalah jumlah hop proxy tepercaya di depan aplikasi,
 	// dihitung dari kanan pada header X-Forwarded-For.
 	// 0 (default) = abaikan seluruh header proxy, pakai RemoteAddr saja (aman untuk aplikasi tanpa proxy).
 	// 1 = satu proxy tepercaya (misalnya Cloud Run, satu load balancer).
-	// Env: RATE_LIMIT_TRUSTED_PROXY_COUNT
+	//
+	// KEAMANAN: nilai > 0 hanya aman bila aplikasi tidak dapat dihubungi langsung,
+	// yakni seluruh trafik wajib melewati proxy tepercaya.
+	//
+	// Env: TRUSTED_PROXY_COUNT
 	TrustedProxyCount int
 }
 
@@ -193,6 +205,11 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	clientIPCfg, err := loadClientIPConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Server:    serverCfg,
 		JWT:       jwtCfg,
@@ -202,6 +219,7 @@ func LoadConfig() (*Config, error) {
 		RateLimit: rateLimitCfg,
 		CORS:      corsCfg,
 		CSRF:      csrfCfg,
+		ClientIP:  clientIPCfg,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -339,17 +357,17 @@ func loadDatabaseConfig() (DatabaseConfig, error) {
 	}
 
 	return DatabaseConfig{
-		Driver:        driver,
-		WriteHost:     GetEnv("DB_WRITE_HOST"),
-		ReadHosts:     readHosts,
-		Port:          port,
-		Database:      GetEnv("DB_NAME"),
-		Username:      GetEnv("DB_USER"),
-		Password:      GetEnv("DB_PASSWORD"),
-		MaxConns:      maxConns,
-		SSLMode:       GetEnvOrDefault("DB_SSL_MODE", "disable"),
-		RuntimeParams: make(map[string]string),
-		QueryExecMode: "",
+		Driver:            driver,
+		WriteHost:         GetEnv("DB_WRITE_HOST"),
+		ReadHosts:         readHosts,
+		Port:              port,
+		Database:          GetEnv("DB_NAME"),
+		Username:          GetEnv("DB_USER"),
+		Password:          GetEnv("DB_PASSWORD"),
+		MaxConns:          maxConns,
+		SSLMode:           GetEnvOrDefault("DB_SSL_MODE", "disable"),
+		RuntimeParams:     make(map[string]string),
+		QueryExecMode:     "",
 		MigrationHost:     GetEnv("DB_MIGRATION_HOST"),
 		MigrationPort:     migrationPort,
 		MigrationUsername: GetEnv("DB_MIGRATION_USER"),
@@ -419,18 +437,26 @@ func loadRateLimitConfig() (RateLimitConfig, error) {
 		return RateLimitConfig{}, fmt.Errorf("invalid RATE_LIMIT_RESET_PERIOD: %w", err)
 	}
 
-	trustedProxyCount, err := ParseEnvInt(GetEnvOrDefault("RATE_LIMIT_TRUSTED_PROXY_COUNT", "0"))
+	return RateLimitConfig{
+		Enabled:     ParseEnvBool(GetEnvOrDefault("RATE_LIMIT_ENABLED", "true")),
+		PerIP:       perIP,
+		PerUser:     perUser,
+		ResetPeriod: resetPeriod,
+	}, nil
+}
+
+// loadClientIPConfig loads client IP resolution configuration
+func loadClientIPConfig() (ClientIPConfig, error) {
+	trustedProxyCount, err := ParseEnvInt(GetEnvOrDefault("TRUSTED_PROXY_COUNT", "0"))
 	if err != nil {
-		return RateLimitConfig{}, fmt.Errorf("invalid RATE_LIMIT_TRUSTED_PROXY_COUNT: %w", err)
+		return ClientIPConfig{}, fmt.Errorf("invalid TRUSTED_PROXY_COUNT: %w", err)
 	}
 
-	return RateLimitConfig{
-		Enabled:           ParseEnvBool(GetEnvOrDefault("RATE_LIMIT_ENABLED", "true")),
-		PerIP:             perIP,
-		PerUser:           perUser,
-		ResetPeriod:       resetPeriod,
-		TrustedProxyCount: trustedProxyCount,
-	}, nil
+	if trustedProxyCount < 0 {
+		return ClientIPConfig{}, fmt.Errorf("invalid TRUSTED_PROXY_COUNT: harus >= 0, dapat %d", trustedProxyCount)
+	}
+
+	return ClientIPConfig{TrustedProxyCount: trustedProxyCount}, nil
 }
 
 // loadCORSConfig loads CORS configuration

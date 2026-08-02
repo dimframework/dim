@@ -40,23 +40,29 @@ func GenerateSecureToken(length int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// GetClientIP mengekstrak client IP address dari HTTP request menggunakan RemoteAddr saja.
-// Fungsi ini aman secara default karena tidak mempercayai header proxy (X-Forwarded-For,
-// X-Real-IP, dll) yang dapat dimanipulasi oleh klien.
+// GetClientIP mengembalikan client IP address dari HTTP request.
 //
-// Gunakan GetClientIPWithTrustedProxies jika aplikasi berjalan di belakang proxy
-// yang tepercaya dan membutuhkan IP asli klien.
+// Bila middleware ClientIP terpasang, fungsi ini mengembalikan IP yang sudah
+// diresolusi middleware tersebut sesuai ClientIPConfig.TrustedProxyCount.
+// Bila tidak, fungsi ini mengembalikan RemoteAddr.
+//
+// RemoteAddr adalah default yang aman: header proxy (X-Forwarded-For, X-Real-IP,
+// dll) dapat dimanipulasi klien, sehingga tidak pernah dipercaya kecuali aplikasi
+// secara eksplisit menyatakan berapa hop proxy yang layak dipercaya.
 //
 // Parameters:
 //   - r: *http.Request yang berisi client information
 //
 // Returns:
-//   - string: client IP address string dari RemoteAddr (IPv4 atau IPv6 format tanpa port)
+//   - string: client IP address string (IPv4 atau IPv6 format tanpa port)
 //
 // Example:
 //
 //	clientIP := GetClientIP(req)  // returns "192.168.1.1" atau "::1"
 func GetClientIP(r *http.Request) string {
+	if clientIP, ok := clientIPFromContext(r); ok {
+		return clientIP
+	}
 	return CleanIPAddress(r.RemoteAddr)
 }
 
@@ -67,8 +73,17 @@ func GetClientIP(r *http.Request) string {
 // menambahkan IP di ujung kanan, sehingga IP klien asli berada di posisi
 // len(entries) - trustedProxyCount dari kiri (dihitung dari kanan sebanyak trustedProxyCount).
 //
-// Jika trustedProxyCount <= 0, hanya RemoteAddr yang digunakan (sama seperti GetClientIP).
-// Jika nilai X-Forwarded-For pada indeks yang dihitung bukan IP valid, jatuh kembali ke RemoteAddr.
+// Seluruh baris header X-Forwarded-For digabungkan terlebih dahulu, karena sebagian
+// proxy menambahkan baris header baru alih-alih menyambung ke baris yang sudah ada.
+//
+// Jatuh kembali ke RemoteAddr bila: trustedProxyCount <= 0, header tidak ada,
+// jumlah entri lebih sedikit daripada trustedProxyCount (rantai proxy lebih pendek
+// daripada yang dikonfigurasi — sisanya berasal dari klien), atau nilai pada indeks
+// yang dihitung bukan IP yang sah.
+//
+// KEAMANAN: mekanisme ini hanya aman bila aplikasi TIDAK dapat dihubungi langsung,
+// yakni seluruh trafik wajib melewati proxy tepercaya. Bila origin masih terjangkau
+// langsung, klien dapat menyusun sendiri seluruh isi header dan memalsukan hasilnya.
 //
 // Parameters:
 //   - r: *http.Request yang berisi client information
@@ -90,15 +105,22 @@ func GetClientIPWithTrustedProxies(r *http.Request, trustedProxyCount int) strin
 		return CleanIPAddress(r.RemoteAddr)
 	}
 
-	xForwardedFor := r.Header.Get("X-Forwarded-For")
+	// Header.Get hanya mengembalikan baris pertama. Sebagian proxy menambahkan
+	// baris X-Forwarded-For terpisah, sehingga baris yang dikirim klien akan
+	// terbaca lebih dulu jika tidak digabungkan. Secara semantik baris berulang
+	// setara dengan satu baris yang dipisah koma (RFC 9110 §5.3).
+	xForwardedFor := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
 	if xForwardedFor != "" {
-		ips := strings.Split(strings.TrimSpace(xForwardedFor), ",")
+		ips := strings.Split(xForwardedFor, ",")
 
 		// Entri paling kanan ditambahkan proxy terakhir (paling dekat dengan kita).
 		// IP klien asli berada di posisi len(ips) - trustedProxyCount.
 		idx := len(ips) - trustedProxyCount
 		if idx < 0 {
-			idx = 0
+			// Rantai proxy lebih pendek daripada yang dikonfigurasi: tidak ada
+			// entri yang dijamin ditulis proxy tepercaya. Entri paling kiri di
+			// sini sepenuhnya dikendalikan klien, jadi jangan dipercaya.
+			return CleanIPAddress(r.RemoteAddr)
 		}
 
 		clientIP := strings.TrimSpace(ips[idx])

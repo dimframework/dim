@@ -12,6 +12,7 @@
 - [CORS Middleware](#cors-middleware)
 - [CSRF Middleware](#csrf-middleware)
 - [Auth Middleware](#auth-middleware)
+- [Client IP Middleware](#client-ip-middleware)
 - [Rate Limiting Middleware](#rate-limiting-middleware)
 - [Advanced: Middleware Chaining](#advanced-middleware-chaining)
 - [Praktik Terbaik](#best-practices)
@@ -44,15 +45,19 @@ router := dim.NewRouter()
 // 1. RECOVERY - HARUS PERTAMA
 router.Use(dim.Recovery(logger))
 
-// 2. LOGGER - HARUS KEDUA
+// 2. CLIENT IP - SEBELUM apa pun yang membaca IP klien
+//    (opsional; hanya jika berjalan di belakang proxy tepercaya)
+router.Use(dim.ClientIP(cfg.ClientIP))
+
+// 3. LOGGER
 router.Use(dim.LoggerMiddleware(logger))
 
-// 3. CORS & CSRF - SEBELUM AUTH
+// 4. CORS & CSRF - SEBELUM AUTH
 router.Use(dim.CORS(corsConfig))
 router.Use(dim.CSRFMiddleware(csrfConfig))
 
-// 4. AUTH - Per grup/rute
-// 5. HANDLER
+// 5. AUTH - Per grup/rute
+// 6. HANDLER
 ```
 
 ---
@@ -62,11 +67,12 @@ router.Use(dim.CSRFMiddleware(csrfConfig))
 | # | Nama | Tujuan | Required |
 |---|------|--------|----------|
 | 1 | `Recovery` | Tangkap panic | ✅ Sangat disarankan |
-| 2 | `LoggerMiddleware` | Log request/response | ✅ Sangat disarankan |
-| 3 | `CORS` | Handle cross-origin | ✅ Jika ada frontend web |
-| 4 | `CSRF` | Proteksi CSRF | ✅ Untuk web tradisional |
-| 5 | `RequireAuth` | JWT verification | ✅ Untuk rute terlindungi |
-| 6 | `RateLimit` | DDoS protection | ⚠️ Opsional |
+| 2 | `ClientIP` | Resolusi IP klien di belakang proxy | ⚠️ Jika di belakang proxy |
+| 3 | `LoggerMiddleware` | Log request/response | ✅ Sangat disarankan |
+| 4 | `CORS` | Handle cross-origin | ✅ Jika ada frontend web |
+| 5 | `CSRF` | Proteksi CSRF | ✅ Untuk web tradisional |
+| 6 | `RequireAuth` | JWT verification | ✅ Untuk rute terlindungi |
+| 7 | `RateLimit` | DDoS protection | ⚠️ Opsional |
 
 ---
 
@@ -168,6 +174,57 @@ func myHandler(w http.ResponseWriter, r *http.Request) {
 
 ---
 
+## Client IP Middleware
+
+Meresolusi IP address klien satu kali di awal request dan menyimpannya di request
+context. Seluruh komponen hilir — `RateLimit`, `LoggerMiddleware`, `GetClientIP`,
+dan `Ctx.ClientIP()` — kemudian membaca nilai yang sama.
+
+### Kapan Dibutuhkan
+
+Hanya jika aplikasi berjalan **di belakang proxy tepercaya** (Cloud Run, load
+balancer, nginx) dan Anda membutuhkan IP asli klien, bukan IP proxy.
+
+Tanpa middleware ini `GetClientIP` mengembalikan `RemoteAddr`. Itu default yang
+aman: header proxy dapat diisi sembarang oleh klien, jadi tidak pernah dipercaya
+kecuali aplikasi menyatakan berapa hop yang layak dipercaya.
+
+### Konfigurasi
+
+```go
+config := dim.ClientIPConfig{
+    TrustedProxyCount: 1,   // di belakang satu proxy; 0 = pakai RemoteAddr
+}
+```
+
+### Penggunaan
+
+```go
+cfg, _ := dim.LoadConfig()
+
+router.Use(dim.ClientIP(cfg.ClientIP))   // sedini mungkin dalam chain
+```
+
+Lalu di handler:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    c := dim.Of(w, r)
+    ip := c.ClientIP()   // IP asli klien, bukan IP proxy
+}
+```
+
+### ⚠️ Catatan Keamanan
+
+`TrustedProxyCount > 0` hanya aman bila aplikasi **tidak dapat dihubungi
+langsung** — seluruh trafik wajib melewati proxy tepercaya. Bila origin masih
+terjangkau langsung, klien dapat menyusun sendiri isi `X-Forwarded-For` dan
+memalsukan IP-nya.
+
+Detail lengkap: [Client IP Configuration](10-configuration.md#client-ip-configuration).
+
+---
+
 ## Rate Limiting Middleware
 
 Melindungi API dari penyalahgunaan dan serangan DDoS dengan membatasi jumlah permintaan per IP dan per pengguna.
@@ -175,6 +232,10 @@ Melindungi API dari penyalahgunaan dan serangan DDoS dengan membatasi jumlah per
 ### Cara Kerja
 
 Middleware ini melacak jumlah permintaan dalam periode waktu tertentu (reset period). Jika batas terlampaui, server akan mengembalikan respons `429 Too Many Requests` beserta header `Retry-After`.
+
+Batas per IP memakai IP hasil resolusi middleware `ClientIP`. Bila middleware itu
+tidak dipasang, `RemoteAddr` yang dipakai — benar untuk aplikasi tanpa proxy, tetapi
+di belakang load balancer seluruh pengguna akan berbagi satu ember rate limit.
 
 ### Konfigurasi
 

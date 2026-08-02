@@ -13,6 +13,7 @@ const (
 	userKey      contextKey = "user"
 	requestIDKey contextKey = "request_id"
 	paramsKey    contextKey = "params"
+	clientIPKey  contextKey = "client_ip"
 )
 
 // SetUser menyimpan user object ke dalam request context.
@@ -118,6 +119,32 @@ func GetRequestID(r *http.Request) string {
 		return requestID
 	}
 	return ""
+}
+
+// SetClientIP menyimpan client IP address yang sudah diresolusi ke dalam context.
+// Biasanya di-set oleh middleware ClientIP di awal request processing, sehingga
+// seluruh komponen hilir (rate limit, logger, handler) membaca nilai yang sama.
+//
+// Parameters:
+//   - r: *http.Request request yang akan diupdate contextnya
+//   - clientIP: string IP address klien yang sudah diresolusi
+//
+// Returns:
+//   - *http.Request: request baru dengan clientIP disimpan di context
+//
+// Example:
+//
+//	req = SetClientIP(req, GetClientIPWithTrustedProxies(req, 1))
+func SetClientIP(r *http.Request, clientIP string) *http.Request {
+	ctx := context.WithValue(r.Context(), clientIPKey, clientIP)
+	return r.WithContext(ctx)
+}
+
+// clientIPFromContext mengambil client IP yang sudah diresolusi dari context.
+// Returns empty string dan false jika middleware ClientIP belum dipasang.
+func clientIPFromContext(r *http.Request) (string, bool) {
+	clientIP, ok := r.Context().Value(clientIPKey).(string)
+	return clientIP, ok && clientIP != ""
 }
 
 // routeParams holds URL parameter key-value pairs captured during tree traversal.

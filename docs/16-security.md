@@ -511,6 +511,44 @@ auth.Post("/login", loginHandler)
 auth.Post("/register", registerHandler)
 ```
 
+### ⚠️ Rate limit per IP bergantung pada resolusi IP yang benar
+
+Batas per IP hanya sekuat cara IP klien ditentukan. Bila salah, rate limit dapat
+dilewati sepenuhnya — persis pada endpoint yang paling membutuhkannya.
+
+Framework memakai `RemoteAddr` secara default dan **mengabaikan seluruh header
+proxy**, karena `X-Forwarded-For`, `X-Real-IP`, dan `X-Forwarded` semuanya dapat
+diisi sembarang oleh klien.
+
+**Jika aplikasi berjalan di belakang proxy**, nyatakan jumlah hop-nya dan pasang
+middleware `ClientIP`:
+
+```bash
+TRUSTED_PROXY_COUNT=1     # Cloud Run, satu load balancer, nginx
+```
+
+```go
+router.Use(dim.ClientIP(cfg.ClientIP))     // sebelum RateLimit
+router.Use(dim.RateLimit(cfg.RateLimit))
+```
+
+**Jika tidak**, biarkan `0`. Jangan menaikkan nilainya "untuk berjaga-jaga" —
+nilai yang melebihi jumlah proxy sesungguhnya membuat framework membaca entri
+yang dikendalikan klien.
+
+### ❌ DON'T: Percayai header proxy tanpa proxy
+
+```go
+// ❌ BURUK - X-Forwarded-For dibaca padahal aplikasi terjangkau langsung.
+// Penyerang cukup memutar header untuk mendapat ember rate limit baru
+// setiap request.
+TRUSTED_PROXY_COUNT=1     // padahal tidak ada proxy di depan aplikasi
+```
+
+`TRUSTED_PROXY_COUNT > 0` mengandaikan origin **tidak dapat dihubungi langsung**.
+Pastikan port aplikasi tertutup dari internet, URL bawaan platform tidak terekspos,
+dan trafik hanya masuk lewat proxy Anda.
+
 ---
 
 ## SQL Injection Prevention
