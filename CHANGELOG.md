@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.8.0] - 2026-08-02
+
 ### Security
 - **`GetClientIP` sekarang aman secara default**: Fungsi tidak lagi membaca header `X-Forwarded-For`, `X-Real-IP`, atau `X-Forwarded`. Header-header ini dapat diisi sembarang oleh klien dan tidak dapat dipercaya tanpa verifikasi proxy. Sekarang `GetClientIP` hanya menggunakan `r.RemoteAddr`. Closes [#12](https://github.com/dimframework/dim/issues/12).
   - ⚠️ **Breaking Change**: Kode yang mengandalkan `GetClientIP` untuk membaca IP dari header proxy harus memasang middleware `ClientIP` dan menyetel `TRUSTED_PROXY_COUNT`.
@@ -21,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Sekarang** (aman): Tanpa middleware `ClientIP`, seluruh komponen memakai `RemoteAddr`. Di belakang proxy, pasang `router.Use(dim.ClientIP(cfg.ClientIP))` sedini mungkin dalam chain.
 - **`SetClientIP(r, ip)`** (baru): Menyimpan IP klien yang sudah diresolusi ke request context, mengikuti pola `SetRequestID`.
 - **`Ctx.Request()`** dan **`Ctx.ResponseWriter()`** (baru): Akses ke `*http.Request` / `http.ResponseWriter` yang dibungkus, untuk kebutuhan yang belum punya helper di `Ctx`.
+
+---
+
+## [v0.7.3] - 2026-07-19
 
 ### Added
 - **`Gone(w, message)`** / **`Ctx.Gone(message)`**: Mengirim response 410 Gone. Berguna untuk resource yang sudah tidak berlaku secara permanen seperti one-time link/token yang sudah expired. Closes [#10](https://github.com/dimframework/dim/issues/10).
