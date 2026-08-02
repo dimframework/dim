@@ -531,7 +531,9 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 | `c.User()` | Ambil authenticated user dari context |
 | `c.Claims()` | Ambil custom claims dari context |
 | `c.RequestID()` | Ambil request ID dari context |
-| `c.ClientIP()` | Ambil IP address client |
+| `c.ClientIP()` | Ambil IP address client (`RemoteAddr`, atau IP hasil middleware `ClientIP`) |
+| `c.Request()` | Ambil `*http.Request` yang dibungkus |
+| `c.ResponseWriter()` | Ambil `http.ResponseWriter` yang dibungkus |
 | `c.Bind(&v)` | Decode JSON body ke struct |
 | `c.Validate()` | Buat instance `*Validator` baru |
 

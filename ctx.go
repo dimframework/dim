@@ -51,8 +51,22 @@ func (c *Ctx) RequestID() string {
 	return GetRequestID(c.r)
 }
 
+// ClientIP mengembalikan IP address klien.
+// Hasilnya mengikuti middleware ClientIP bila terpasang, selain itu RemoteAddr.
 func (c *Ctx) ClientIP() string {
 	return GetClientIP(c.r)
+}
+
+// Request mengembalikan *http.Request yang dibungkus Ctx.
+// Berguna untuk kebutuhan yang belum punya helper di Ctx, misalnya memanggil
+// GetClientIPWithTrustedProxies secara langsung atau mengakses r.Context().
+func (c *Ctx) Request() *http.Request {
+	return c.r
+}
+
+// ResponseWriter mengembalikan http.ResponseWriter yang dibungkus Ctx.
+func (c *Ctx) ResponseWriter() http.ResponseWriter {
+	return c.w
 }
 
 func (c *Ctx) Bind(v interface{}) error {

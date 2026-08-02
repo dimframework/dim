@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **`GetClientIP` sekarang aman secara default**: Fungsi tidak lagi membaca header `X-Forwarded-For`, `X-Real-IP`, atau `X-Forwarded`. Header-header ini dapat diisi sembarang oleh klien dan tidak dapat dipercaya tanpa verifikasi proxy. Sekarang `GetClientIP` hanya menggunakan `r.RemoteAddr`. Closes [#12](https://github.com/dimframework/dim/issues/12).
+  - ⚠️ **Breaking Change**: Kode yang mengandalkan `GetClientIP` untuk membaca IP dari header proxy harus memasang middleware `ClientIP` dan menyetel `TRUSTED_PROXY_COUNT`.
+  - `Ctx.ClientIP()` juga ikut berubah — tanpa middleware `ClientIP` sekarang mengembalikan `RemoteAddr`.
+- **`GetClientIPWithTrustedProxies(r, trustedProxyCount int) string`** (baru): Fungsi pengganti untuk aplikasi yang berjalan di belakang proxy tepercaya. Membaca `X-Forwarded-For` dari kanan ke kiri sebanyak `trustedProxyCount` hop, sehingga entri yang ditambahkan klien di sebelah kiri tidak ikut dipercaya. Seluruh baris `X-Forwarded-For` digabungkan lebih dulu, karena sebagian proxy menambahkan baris header baru alih-alih menyambung ke baris yang ada.
+  - **Contoh**: `dim.GetClientIPWithTrustedProxies(r, 1)` untuk aplikasi di belakang satu load balancer (Cloud Run, nginx, dll).
+  - Jatuh kembali ke `RemoteAddr` bila `trustedProxyCount <= 0`, header tidak ada, jumlah entri lebih sedikit daripada `trustedProxyCount`, atau nilai pada posisi tersebut bukan IP yang sah.
+  - ⚠️ Hanya aman bila aplikasi tidak dapat dihubungi langsung — seluruh trafik wajib melewati proxy tepercaya.
+- **`ClientIPConfig` + middleware `ClientIP(config)`** (baru): Konfigurasi resolusi IP klien tingkat aplikasi, bukan per middleware. `ClientIP` meresolusi IP satu kali di awal request dan menyimpannya ke request context, sehingga rate limiting, logging, audit trail, `GetClientIP`, dan `Ctx.ClientIP()` semuanya membaca nilai yang sama.
+  - Env: `TRUSTED_PROXY_COUNT` (default `0`). Nilai negatif ditolak saat `LoadConfig()`.
+  - **Sebelum** (rentan): `PerIP` rate limit dapat dilewati dengan mengirim header `X-Forwarded-For` sembarang.
+  - **Sekarang** (aman): Tanpa middleware `ClientIP`, seluruh komponen memakai `RemoteAddr`. Di belakang proxy, pasang `router.Use(dim.ClientIP(cfg.ClientIP))` sedini mungkin dalam chain.
+- **`SetClientIP(r, ip)`** (baru): Menyimpan IP klien yang sudah diresolusi ke request context, mengikuti pola `SetRequestID`.
+- **`Ctx.Request()`** dan **`Ctx.ResponseWriter()`** (baru): Akses ke `*http.Request` / `http.ResponseWriter` yang dibungkus, untuk kebutuhan yang belum punya helper di `Ctx`.
+
 ### Added
 - **`Gone(w, message)`** / **`Ctx.Gone(message)`**: Mengirim response 410 Gone. Berguna untuk resource yang sudah tidak berlaku secara permanen seperti one-time link/token yang sudah expired. Closes [#10](https://github.com/dimframework/dim/issues/10).
 - **`UnprocessableEntity(w, message, errors)`** / **`Ctx.UnprocessableEntity(message, errors)`**: Mengirim response 422 Unprocessable Entity. Berguna untuk request yang valid secara sintaktik tetapi melanggar aturan domain/bisnis (semantically invalid) — berbeda dari 400 (malformed) dan 409 (state conflict). Closes [#10](https://github.com/dimframework/dim/issues/10).

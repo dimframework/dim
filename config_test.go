@@ -444,6 +444,41 @@ func TestLoadRateLimitConfig_InvalidPerUser(t *testing.T) {
 	}
 }
 
+func TestLoadClientIPConfig_Default(t *testing.T) {
+	os.Unsetenv("TRUSTED_PROXY_COUNT")
+	cfg, err := loadClientIPConfig()
+	if err != nil {
+		t.Fatalf("loadClientIPConfig() error = %v", err)
+	}
+	// Default aman: abaikan header proxy.
+	if cfg.TrustedProxyCount != 0 {
+		t.Errorf("TrustedProxyCount = %d, want 0", cfg.TrustedProxyCount)
+	}
+}
+
+func TestLoadClientIPConfig_FromEnv(t *testing.T) {
+	os.Setenv("TRUSTED_PROXY_COUNT", "2")
+	defer os.Unsetenv("TRUSTED_PROXY_COUNT")
+	cfg, err := loadClientIPConfig()
+	if err != nil {
+		t.Fatalf("loadClientIPConfig() error = %v", err)
+	}
+	if cfg.TrustedProxyCount != 2 {
+		t.Errorf("TrustedProxyCount = %d, want 2", cfg.TrustedProxyCount)
+	}
+}
+
+func TestLoadClientIPConfig_Invalid(t *testing.T) {
+	for _, value := range []string{"not-a-number", "-1"} {
+		os.Setenv("TRUSTED_PROXY_COUNT", value)
+		_, err := loadClientIPConfig()
+		os.Unsetenv("TRUSTED_PROXY_COUNT")
+		if err == nil {
+			t.Errorf("loadClientIPConfig() should fail for TRUSTED_PROXY_COUNT=%q", value)
+		}
+	}
+}
+
 func TestLoadRateLimitConfig_FullConfig(t *testing.T) {
 	os.Setenv("RATE_LIMIT_ENABLED", "false")
 	os.Setenv("RATE_LIMIT_PER_IP", "50")

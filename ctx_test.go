@@ -116,10 +116,12 @@ func TestCtx_RequestID(t *testing.T) {
 
 func TestCtx_ClientIP(t *testing.T) {
 	w, r := newCtxRequest(http.MethodGet, "/", "")
+	r.RemoteAddr = "5.6.7.8:1234"
+	// X-Real-IP is intentionally ignored — GetClientIP uses RemoteAddr only (secure default).
 	r.Header.Set("X-Real-IP", "1.2.3.4")
 	c := Of(w, r)
-	if got := c.ClientIP(); got != "1.2.3.4" {
-		t.Errorf("ClientIP = %q, want %q", got, "1.2.3.4")
+	if got := c.ClientIP(); got != "5.6.7.8" {
+		t.Errorf("ClientIP = %q, want %q", got, "5.6.7.8")
 	}
 }
 

@@ -12,6 +12,7 @@ Pelajari cara mengkonfigurasi framework dim menggunakan environment variables.
 - [CORS Configuration](#cors-configuration)
 - [CSRF Configuration](#csrf-configuration)
 - [Rate Limiting Configuration](#rate-limiting-configuration)
+- [Client IP Configuration](#client-ip-configuration)
 - [Email Configuration](#email-configuration)
 - [Load Configuration](#load-configuration)
 - [Praktik Terbaik](#best-practices)
@@ -516,6 +517,10 @@ RATE_LIMIT_PER_USER=200
 RATE_LIMIT_RESET_PERIOD=1h
 ```
 
+> Rate limit per IP memakai IP hasil resolusi middleware `ClientIP`. Bila aplikasi
+> berjalan di belakang proxy, atur `TRUSTED_PROXY_COUNT` dan pasang middleware
+> `ClientIP` — lihat [Client IP Configuration](#client-ip-configuration).
+
 ### Rate Limit Config Struct
 
 ```go
@@ -545,6 +550,78 @@ RATE_LIMIT_PER_IP=1000
 RATE_LIMIT_PER_USER=2000
 RATE_LIMIT_RESET_PERIOD=1h
 ```
+
+---
+
+## Client IP Configuration
+
+Menentukan bagaimana framework meresolusi IP address klien. Nilai ini dipakai
+seragam oleh rate limiting, logging, audit trail, dan `Ctx.ClientIP()`.
+
+### Environment Variables
+
+```bash
+# Jumlah hop proxy tepercaya di depan aplikasi (default: 0)
+TRUSTED_PROXY_COUNT=0
+```
+
+### Client IP Config Struct
+
+```go
+type ClientIPConfig struct {
+    TrustedProxyCount int
+}
+```
+
+### Cara Kerja
+
+`X-Forwarded-For` adalah daftar yang **ditambahkan dari kanan**: setiap proxy
+menambahkan IP yang dilihatnya di ujung kanan. Entri paling kiri karenanya adalah
+nilai yang paling jauh — dan sepenuhnya dapat diisi klien.
+
+```
+Klien mengirim:    X-Forwarded-For: 1.2.3.4
+Diterima aplikasi: X-Forwarded-For: 1.2.3.4, 203.0.113.9
+                                    ^palsu   ^ditulis proxy = IP asli klien
+```
+
+`TRUSTED_PROXY_COUNT` menyatakan berapa entri dari kanan yang ditulis oleh proxy
+milik Anda, sehingga framework tahu entri mana yang layak dibaca.
+
+| Nilai | Kapan dipakai | Hasil |
+|-------|---------------|-------|
+| `0` (default) | Aplikasi terjangkau langsung, tanpa proxy | `RemoteAddr`, seluruh header proxy diabaikan |
+| `1` | Di belakang satu proxy (Cloud Run, satu load balancer, nginx) | Entri kedua dari kanan |
+| `2` | Di belakang dua hop (CDN → load balancer) | Entri ketiga dari kanan |
+
+### Penggunaan
+
+Konfigurasi saja tidak cukup — pasang juga middleware `ClientIP`, sedini mungkin
+dalam chain:
+
+```go
+cfg, _ := dim.LoadConfig()
+
+router := dim.NewRouter()
+router.Use(dim.ClientIP(cfg.ClientIP))     // paling awal
+router.Use(dim.RateLimit(cfg.RateLimit))   // ikut memakai IP hasil resolusi
+```
+
+Tanpa middleware tersebut, `GetClientIP` dan `Ctx.ClientIP()` mengembalikan
+`RemoteAddr` — default yang aman, bukan error.
+
+### ⚠️ Catatan Keamanan
+
+`TRUSTED_PROXY_COUNT > 0` **hanya aman bila aplikasi tidak dapat dihubungi
+langsung** — seluruh trafik wajib melewati proxy tepercaya. Bila origin masih
+terjangkau langsung (port terbuka, URL Cloud Run bawaan, service di k8s tanpa
+NetworkPolicy), klien dapat menyusun sendiri seluruh isi `X-Forwarded-For` dan
+memalsukan IP-nya.
+
+Jangan menaikkan nilainya "untuk berjaga-jaga": nilai yang lebih besar daripada
+jumlah proxy sesungguhnya membuat framework membaca entri yang dikendalikan
+klien. Bila rantai proxy lebih pendek daripada yang dikonfigurasi, framework
+jatuh kembali ke `RemoteAddr`.
 
 ---
 
@@ -659,6 +736,7 @@ RATE_LIMIT_ENABLED           → true
 RATE_LIMIT_PER_IP            → 100
 RATE_LIMIT_PER_USER          → 200
 RATE_LIMIT_RESET_PERIOD      → "1h"
+TRUSTED_PROXY_COUNT          → 0
 ```
 
 ---

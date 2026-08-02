@@ -81,6 +81,12 @@ Middleware untuk perlindungan Cross-Site Request Forgery.
 ### RateLimit
 `func RateLimit(config RateLimitConfig, store ...RateLimitStore) MiddlewareFunc`
 Middleware untuk pembatasan kecepatan. Mendukung variadic store (default: InMemory).
+Batas per IP memakai hasil `GetClientIP`.
+
+### ClientIP
+`func ClientIP(config ClientIPConfig) MiddlewareFunc`
+Meresolusi IP klien sesuai `TrustedProxyCount` dan menyimpannya ke konteks.
+Pasang sedini mungkin, sebelum middleware lain yang membaca IP.
 
 ### Middleware Helpers
 - `Chain(handler HandlerFunc, middleware ...MiddlewareFunc) HandlerFunc`
@@ -118,6 +124,19 @@ Mengekstrak token Bearer dari header `Authorization`.
 ### GetRequestID
 `func GetRequestID(r *http.Request) string`
 Mengambil ID permintaan unik dari konteks.
+
+### GetClientIP
+`func GetClientIP(r *http.Request) string`
+Mengambil IP klien: hasil middleware `ClientIP` bila terpasang, selain itu `RemoteAddr`.
+
+### GetClientIPWithTrustedProxies
+`func GetClientIPWithTrustedProxies(r *http.Request, trustedProxyCount int) string`
+Membaca `X-Forwarded-For` dari kanan sebanyak `trustedProxyCount` hop. Primitif tingkat
+rendah — umumnya cukup pakai middleware `ClientIP`.
+
+### SetClientIP
+`func SetClientIP(r *http.Request, clientIP string) *http.Request`
+Menyimpan IP klien yang sudah diresolusi ke konteks.
 
 ---
 
