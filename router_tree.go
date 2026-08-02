@@ -9,9 +9,9 @@ import (
 type nodeTyp uint8
 
 const (
-	ntStatic  nodeTyp = iota // /users/
-	ntParam                  // {id}
-	ntCatchAll               // {path...}
+	ntStatic   nodeTyp = iota // /users/
+	ntParam                   // {id}
+	ntCatchAll                // {path...}
 )
 
 // treeEndpoint holds the handler for a specific HTTP method.
@@ -26,8 +26,8 @@ type treeNode struct {
 	prefix    string
 	label     byte // first byte of prefix for O(1) label comparison
 	typ       nodeTyp
-	paramKey  string                    // key name for ntParam / ntCatchAll
-	endpoints map[string]*treeEndpoint  // method → endpoint
+	paramKey  string                   // key name for ntParam / ntCatchAll
+	endpoints map[string]*treeEndpoint // method → endpoint
 	children  [3][]*treeNode
 }
 

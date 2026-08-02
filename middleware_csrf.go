@@ -100,7 +100,7 @@ func SetCSRFToken(w http.ResponseWriter, token string, config CSRFConfig) {
 		Name:     config.CookieName,
 		Value:    token,
 		Path:     "/",
-		HttpOnly: false,                // Must be accessible from JavaScript
+		HttpOnly: false, // Must be accessible from JavaScript
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   config.CookieMaxAge, // Menggunakan konfigurasi MaxAge (default 12 jam)
 	}

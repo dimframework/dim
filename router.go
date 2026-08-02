@@ -33,10 +33,10 @@ type staticEntry struct {
 //   - Dynamic routes (dengan {param} atau {path...}): O(k) radix tree traversal
 //   - Static file / SPA: dilayani oleh http.ServeMux sebagai fallback
 type Router struct {
-	mux          *http.ServeMux                            // fallback untuk Static() dan SPA()
-	staticRoutes map[string]*staticEntry                   // O(1) map untuk path tanpa parameter
-	tree         *treeNode                                 // radix tree untuk path dengan parameter
-	middleware   []MiddlewareFunc
+	mux           *http.ServeMux          // fallback untuk Static() dan SPA()
+	staticRoutes  map[string]*staticEntry // O(1) map untuk path tanpa parameter
+	tree          *treeNode               // radix tree untuk path dengan parameter
+	middleware    []MiddlewareFunc
 	cachedHandler http.Handler
 	initialized   bool
 	lock          sync.RWMutex

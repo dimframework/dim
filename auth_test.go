@@ -417,10 +417,10 @@ func TestWithClaimsProvider(t *testing.T) {
 
 	// 2. Test Refresh Token with Claims
 	_, refreshToken, _ := service.Login(ctx, "test@example.com", "ValidPass123!")
-	
+
 	// Fast forward time slightly to ensure rotation works if needed
 	time.Sleep(10 * time.Millisecond)
-	
+
 	newAccessToken, _, err := service.RefreshToken(ctx, refreshToken)
 	if err != nil {
 		t.Fatalf("RefreshToken() error = %v", err)
