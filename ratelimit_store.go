@@ -123,6 +123,12 @@ func (s *DatabaseRateLimitStore) Allow(ctx context.Context, key string, limit in
 	// Jika record ada tapi expired (expires_at < now), reset count ke 1 dan update expires_at.
 	// Jika record ada dan valid, increment count.
 	// Jika record baru, insert dengan count 1.
+	// PENTING: setiap placeholder muncul TEPAT SEKALI dan argumen dikirim mengikuti
+	// urutan kemunculannya di teks query. Placeholder tidak boleh dipakai ulang
+	// (misal $3 dua kali) karena SQLiteDatabase.Rebind mengganti setiap "$N" dengan
+	// "?" secara posisional — pemakaian ulang menggeser pemetaan argumen tanpa
+	// menimbulkan error. Nilai yang sama karenanya dikirim dua kali sebagai
+	// placeholder terpisah: $3/$4 = now, $2/$5 = expiresAt.
 	query := `
 		INSERT INTO rate_limits (key, count, expires_at)
 		VALUES ($1, 1, $2)
@@ -132,17 +138,16 @@ func (s *DatabaseRateLimitStore) Allow(ctx context.Context, key string, limit in
 			ELSE rate_limits.count + 1
 		END,
 		expires_at = CASE
-			WHEN rate_limits.expires_at < $3 THEN $4
+			WHEN rate_limits.expires_at < $4 THEN $5
 			ELSE rate_limits.expires_at
 		END
 		RETURNING count
 	`
 
 	var count int
-	// Placeholders: $1=key, $2=expiresAt, $3=now, $4=expiresAt, $5=now
-	// Note: We repeat args because database/sql (SQLite) doesn't always support named positional reuse like pgx.
+	// Urutan wajib sesuai $1..$5: key, expiresAt, now, now, expiresAt.
 	query = s.db.Rebind(query)
-	err := s.db.QueryRow(ctx, query, key, expiresAt, now, expiresAt, now).Scan(&count)
+	err := s.db.QueryRow(ctx, query, key, expiresAt, now, now, expiresAt).Scan(&count)
 	if err != nil {
 		return false, err
 	}

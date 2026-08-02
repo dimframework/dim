@@ -10,6 +10,24 @@ jobs:
   test:
     name: Test and Coverage
     runs-on: ubuntu-latest
+
+    # Tanpa Postgres, seluruh test integrasi Postgres akan skip diam-diam.
+    # Itulah yang membuat bug DatabaseRateLimitStore lolos ke rilis.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dim_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
 
@@ -22,5 +40,22 @@ jobs:
     - name: Install Dependencies
       run: go mod download
 
+    - name: Check formatting
+      run: |
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "Berkas berikut belum diformat dengan gofmt:"
+          echo "$unformatted"
+          exit 1
+        fi
+
+    - name: Vet
+      run: go vet ./...
+
     - name: Run Tests
+      env:
+        TEST_PG_HOST: localhost
+        TEST_PG_DB: dim_test
+        TEST_PG_USER: postgres
+        TEST_PG_PASS: postgres
       run: go test -v -coverprofile=coverage.out ./...

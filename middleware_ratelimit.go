@@ -2,6 +2,7 @@ package dim
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 )
 
@@ -47,8 +48,15 @@ func RateLimit(config RateLimitConfig, store ...RateLimitStore) MiddlewareFunc {
 			// Check IP rate limit
 			allowed, err := limiter.CheckIPLimit(ctx, clientIP)
 			if err != nil {
-				// Fail open: Jika store error, biarkan request lewat tapi log error (jika ada logger)
-				// Strategi ini mencegah downtime API gara-gara cache/DB down.
+				// Fail open: jika store error, request tetap diteruskan agar API tidak
+				// ikut tumbang saat cache/DB bermasalah. Tetapi kegagalan ini WAJIB
+				// terlihat — rate limit yang mati diam-diam berarti proteksi brute
+				// force hilang tanpa ada yang tahu.
+				slog.Default().Error("rate limit store gagal, request diteruskan tanpa pembatasan",
+					"scope", "ip",
+					"path", r.URL.Path,
+					"error", err,
+				)
 			} else if !allowed {
 				TooManyRequests(w, int(config.ResetPeriod.Seconds()))
 				return
@@ -59,7 +67,13 @@ func RateLimit(config RateLimitConfig, store ...RateLimitStore) MiddlewareFunc {
 			if ok {
 				userKey := fmt.Sprintf("user:%s", user.GetID())
 				allowed, err := limiter.CheckUserLimit(ctx, userKey)
-				if err == nil && !allowed {
+				if err != nil {
+					slog.Default().Error("rate limit store gagal, request diteruskan tanpa pembatasan",
+						"scope", "user",
+						"path", r.URL.Path,
+						"error", err,
+					)
+				} else if !allowed {
 					TooManyRequests(w, int(config.ResetPeriod.Seconds()))
 					return
 				}

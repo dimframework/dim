@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.8.1] - 2026-08-02
+
+### Fixed
+- **`DatabaseRateLimitStore.Allow` rusak di kedua driver**: Query UPSERT mengirim 5 argumen untuk teks query yang hanya punya 4 placeholder berbeda. Akibatnya rate limiting berbasis database tidak berefek sama sekali sejak diperkenalkan — paling berdampak pada proteksi brute force di endpoint login dan forgot-password.
+  - **PostgreSQL**: pgx menolak setiap panggilan dengan `expected 4 arguments, got 5`. Karena `RateLimit` fail open, error ini membuat seluruh request diteruskan tanpa pembatasan.
+  - **SQLite**: tidak ada error, tetapi `Rebind` mengganti setiap `$N` dengan `?` secara posisional sehingga placeholder yang dipakai ulang menggeser pemetaan argumen. `expires_at` ditimpa dengan waktu yang sudah lewat, sehingga counter ter-reset di setiap request berikutnya dan limit tidak pernah tercapai.
+  - Setiap placeholder kini muncul tepat sekali dan argumen dikirim mengikuti urutan kemunculannya. Nilai yang sama dikirim dua kali sebagai placeholder terpisah.
+
+### Changed
+- **`RateLimit` kini mencatat kegagalan store**: Blok fail open sebelumnya kosong — hanya berisi komentar — sehingga rate limit yang mati tidak meninggalkan jejak apa pun. Kegagalan store kini dicatat via `slog.Default()` pada level Error, untuk cakupan IP maupun user. Perilaku fail open tetap dipertahankan agar API tidak ikut tumbang saat DB bermasalah.
+
+### Testing
+- **Test Postgres untuk `DatabaseRateLimitStore`** (baru): Ketiadaan test inilah yang membuat bug di atas lolos ke rilis.
+- **Test SQLite lintas batas detik** (baru): Test SQLite yang lama menjalankan seluruh panggilannya dalam satu detik yang sama, sehingga salah-peta argumen kebetulan tidak berdampak dan tidak tertangkap.
+- **CI kini menjalankan service PostgreSQL**: Sebelumnya seluruh test integrasi Postgres skip diam-diam karena `TEST_PG_HOST` tidak pernah di-set. Ditambahkan pula gate `gofmt` dan `go vet`.
+
+---
+
 ## [v0.8.0] - 2026-08-02
 
 ### Security
