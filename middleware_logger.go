@@ -5,31 +5,6 @@ import (
 	"time"
 )
 
-// responseWriter wraps http.ResponseWriter to capture status code
-type responseWriter struct {
-	http.ResponseWriter
-	statusCode int
-	written    bool
-}
-
-// WriteHeader captures the status code
-func (rw *responseWriter) WriteHeader(statusCode int) {
-	if !rw.written {
-		rw.statusCode = statusCode
-		rw.written = true
-		rw.ResponseWriter.WriteHeader(statusCode)
-	}
-}
-
-// Write captures writes
-func (rw *responseWriter) Write(b []byte) (int, error) {
-	if !rw.written {
-		rw.statusCode = http.StatusOK
-		rw.written = true
-	}
-	return rw.ResponseWriter.Write(b)
-}
-
 // LoggerMiddleware membuat middleware yang log HTTP requests dan responses.
 // Middleware ini:
 // 1. Generate unique request ID dan set di context untuk request tracing
@@ -58,24 +33,30 @@ func LoggerMiddleware(logger *Logger) MiddlewareFunc {
 			requestID, _ := GenerateSecureToken(16)
 			r = SetRequestID(r, requestID)
 
-			// Wrap response writer
-			rw := &responseWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
+			// Wrap response writer. wrapResponseWriter mempertahankan antarmuka
+			// opsional milik w (Flusher, Hijacker, ReaderFrom) supaya handler
+			// streaming dan upgrade WebSocket tetap berfungsi di balik middleware.
+			wrapped, rw := wrapResponseWriter(w)
 
-			next(rw, r)
+			next(wrapped, r)
 
 			duration := time.Since(start)
 
-			// Log the request
-			logger.Info("request completed",
+			attrs := []any{
 				"request_id", requestID,
 				"method", r.Method,
 				"path", r.RequestURI,
 				"status", rw.statusCode,
 				"duration_ms", duration.Milliseconds(),
-			)
+			}
+
+			// Setelah Hijack, koneksi keluar dari kendali net/http dan status yang
+			// tercatat tidak lagi mewakili apa pun yang dikirim ke klien.
+			if rw.hijacked {
+				attrs = append(attrs, "hijacked", true)
+			}
+
+			logger.Info("request completed", attrs...)
 		}
 	}
 }

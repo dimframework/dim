@@ -445,6 +445,21 @@ logger.Info("Request completed",
 )
 ```
 
+### Response Writer yang Dibungkus
+
+Untuk menangkap status code, middleware ini membungkus `http.ResponseWriter`.
+Pembungkusnya mempertahankan antarmuka opsional milik writer aslinya
+(`http.Flusher`, `http.Hijacker`, `io.ReaderFrom`), sehingga SSE, streaming,
+upgrade WebSocket, dan jalur cepat penyajian file statis tetap berfungsi.
+
+Handler streaming sebaiknya memakai `http.ResponseController` — lihat
+[Logger Middleware](05-middleware.md#logger-middleware) untuk contoh dan
+batasannya.
+
+Request yang koneksinya diambil alih lewat `Hijack` — misalnya upgrade
+WebSocket — ditandai `hijacked=true` pada lognya. Status pada baris itu tidak
+bermakna, karena koneksi sudah keluar dari kendali `net/http`.
+
 ---
 
 ## Logging Best Practices

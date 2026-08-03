@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.8.2] - 2026-08-03
+
+### Fixed
+- **`LoggerMiddleware` melumpuhkan SSE, streaming, dan WebSocket**: Pembungkus `http.ResponseWriter` yang dipakai untuk menangkap status code tidak menyediakan `Unwrap()` dan tidak meneruskan antarmuka opsional. Karena middleware ini lazim dipasang global lewat `router.Use`, seluruh handler di aplikasi kehilangan `http.Flusher`, `http.Hijacker`, dan `io.ReaderFrom`. Closes [#16](https://github.com/dimframework/dim/issues/16).
+  - **SSE dan streaming**: tanpa `Flush`, respons tertahan di buffer sampai handler selesai. `http.NewResponseController(w).Flush()` pun mengembalikan `feature not supported` karena `Unwrap()` tidak ada — sehingga tidak ada jalan keluar dari sisi pemakai.
+  - **WebSocket**: `w.(http.Hijacker)` gagal, sehingga `gorilla/websocket` dan `coder/websocket` menolak koneksi. Keduanya memakai type assertion langsung, bukan `ResponseController`.
+  - **File statis**: `io.ReaderFrom` yang hilang membuat `Router.Static` kehilangan jalur cepat `sendfile` dan jatuh ke salin-buffer.
+  - Pembungkus kini menyediakan `Unwrap()` dan memilih varian sesuai kemampuan writer aslinya, sehingga antarmuka yang dimiliki diteruskan apa adanya — dan yang tidak dimiliki tidak dipalsukan. Di HTTP/2 yang tanpa `Hijacker`, `w.(http.Hijacker)` tetap gagal sebagaimana mestinya alih-alih berhasil lalu error saat dipanggil.
+  - `http.Pusher` tidak diteruskan (HTTP/2 server push tidak lagi didukung peramban arus utama); tetap terjangkau lewat `Unwrap()`.
+
+### Changed
+- **Log request yang koneksinya diambil alih ditandai `hijacked=true`**: Setelah `Hijack`, koneksi keluar dari kendali `net/http` dan status yang tercatat tidak lagi mewakili apa pun yang dikirim ke klien.
+
+---
+
 ## [v0.8.1] - 2026-08-02
 
 ### Fixed

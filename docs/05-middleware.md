@@ -94,6 +94,48 @@ Mencatat detail request (method, path, status code, duration) dengan format ters
 router.Use(dim.LoggerMiddleware(logger))
 ```
 
+### Streaming, SSE, dan WebSocket
+
+Middleware ini membungkus `http.ResponseWriter` untuk menangkap status code.
+Pembungkusnya mempertahankan antarmuka opsional milik writer aslinya —
+`http.Flusher`, `http.Hijacker`, dan `io.ReaderFrom` — sehingga SSE, respons
+chunked, upgrade WebSocket, dan jalur cepat penyajian file statis tetap
+berfungsi di baliknya.
+
+Untuk handler streaming, gunakan `http.ResponseController` (cara resmi sejak
+Go 1.20 untuk writer terbungkus):
+
+```go
+func streamHandler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/event-stream")
+    rc := http.NewResponseController(w)
+
+    for _, msg := range messages {
+        fmt.Fprintf(w, "data: %s\n\n", msg)
+        if err := rc.Flush(); err != nil {
+            return
+        }
+    }
+}
+```
+
+Type assertion langsung seperti `w.(http.Flusher)` juga tetap bekerja, sehingga
+pustaka WebSocket yang mengandalkan `w.(http.Hijacker)` — `gorilla/websocket`
+dan `coder/websocket` — dapat dipakai tanpa penyesuaian.
+
+> Pembungkus hanya meneruskan antarmuka yang **benar-benar dimiliki** writer
+> aslinya. Di HTTP/2 yang tidak punya `Hijacker`, `w.(http.Hijacker)` tetap
+> gagal sebagaimana mestinya, bukan berhasil lalu error saat dipanggil.
+
+Dua catatan:
+
+- `http.Pusher` tidak diteruskan. HTTP/2 server push sudah tidak didukung
+  peramban arus utama. Bila tetap dibutuhkan, jangkau lewat
+  `http.NewResponseController(w)` atau `Unwrap()`.
+- Setelah `Hijack`, koneksi keluar dari kendali `net/http` dan status yang
+  tercatat tidak lagi mewakili apa pun yang dikirim ke klien. Log untuk request
+  semacam itu diberi tanda `hijacked=true`.
+
 ---
 
 ## CORS Middleware
