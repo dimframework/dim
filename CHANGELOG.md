@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Route berparameter melayani path yang lebih dalam**: `matchInternal` mengembalikan endpoint node saat ini tanpa memeriksa apakah path sudah habis dikonsumsi, sehingga `/m/{slug}` juga menjawab `/m/abc/x/y/z` dan `/campaign/{slug}/donate` menjawab `/campaign/x/donate/lagi`. URL yang tidak terdaftar merender halaman yang tampak sah alih-alih `404`, dan perayap dapat mengindeks URL tak terhingga di bawah satu route. Closes [#15](https://github.com/dimframework/dim/issues/15).
+  - Endpoint node kini hanya dipakai bila `path == ""`. Route tanpa parameter tidak terdampak karena dilayani peta statis, bukan pohon radix — itu pula sebabnya test yang ada tidak menangkap bug ini.
+  - ⚠️ **Perubahan perilaku**: `/m/abc/` (trailing slash) pada `/m/{slug}` kini `404`, konsisten dengan route statis yang memang sudah begitu. Untuk melayani seluruh sub-path, daftarkan catch-all secara eksplisit: `/m/{slug}/{rest...}`.
+  - Catatan: path yang tidak cocok tetap diteruskan ke `Static()` dan `SPA()`. Pada aplikasi yang memakai `SPA()`, path tersebut menerima `index.html` lewat wildcard `GET /{path...}`, bukan `404` — sebagaimana mestinya untuk route sisi klien.
+- **`405` dari cabang yang cocok sebagian menutupi cabang lain yang benar-benar cocok**: Penelusuran berhenti begitu sebuah cabang mengembalikan daftar metode, sehingga dengan `POST /user/new/{id}` dan `GET /user/{name}/{id}` terdaftar, `GET /user/new/5` dijawab `405` padahal ada handler yang cocok. Daftar metode kini dikumpulkan dan baru dilaporkan bila tidak ada satu pun cabang yang menghasilkan handler.
+  - Parameter dari cabang yang gagal juga ikut dibersihkan; sebelumnya nilai yang tertinggal bisa terbawa ke handler yang akhirnya cocok.
+- **Header `Allow` hanya memuat metode dari cabang pertama**: Pada contoh di atas, `DELETE /user/new/5` menjawab `405` dengan `Allow: POST` dan menyembunyikan `GET`. Metode kini digabungkan dari seluruh cabang yang path-nya cocok, lalu diurutkan dan dide-duplikasi, sesuai RFC 7231 §7.4.1.
+- **Anak parameter kedua pada level yang sama tak pernah terjangkau**: Pencocokan hanya mencoba anak parameter pertama, sedangkan pola yang hanya berbeda nama parameternya menghasilkan node terpisah. Dengan `/a/{id}` dan `/a/{slug}/edit` terdaftar, `/a/5/edit` tidak pernah sampai ke handler-nya. Seluruh anak parameter (dan catch-all) kini dicoba dengan backtracking, seperti anak statis.
+
+### Testing
+- **`router_tree_test.go`** (baru): Menguji pohon radix secara terpisah dari peta statis — kedalaman path, trailing slash, catch-all, `405` beserta header `Allow`, backtracking antar cabang, dan kebocoran parameter.
+
 ---
 
 ## [v0.8.2] - 2026-08-03

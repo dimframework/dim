@@ -139,20 +139,26 @@ func (n *treeNode) insertParam(pattern, method string, handler HandlerFunc) {
 func (n *treeNode) match(method, path string) (HandlerFunc, *routeParams, string, bool) {
 	keys := make([]string, 0, 4)
 	vals := make([]string, 0, 4)
+	var allowed []string // stays nil unless a 405 candidate is found
 
-	h, allowed, found := n.matchInternal(method, path, &keys, &vals)
+	h, found := n.matchInternal(method, path, &keys, &vals, &allowed)
 	if found {
 		return h, &routeParams{keys: keys, vals: vals}, "", true
 	}
-	if allowed != "" {
-		return nil, nil, allowed, false
+	if len(allowed) > 0 {
+		return nil, nil, joinAllowedMethods(allowed), false
 	}
 	return nil, nil, "", false
 }
 
 // matchInternal is the recursive worker for match.
 // It appends matched params to *keys/*vals and backtracks on failure.
-func (n *treeNode) matchInternal(method, path string, keys, vals *[]string) (HandlerFunc, string, bool) {
+//
+// A branch whose path matches but lacks the requested method (405) does not stop
+// the search: its methods are collected into *allowed and only reported when no
+// branch at all produces a handler. Otherwise such a branch would mask a sibling
+// branch that does handle the method.
+func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]string) (HandlerFunc, bool) {
 	if path != "" {
 		// 1. Static children — try each child whose label matches path[0].
 		label := path[0]
@@ -163,64 +169,60 @@ func (n *treeNode) matchInternal(method, path string, keys, vals *[]string) (Han
 			if !strings.HasPrefix(path, c.prefix) {
 				continue
 			}
-			h, allowed, found := c.matchInternal(method, path[len(c.prefix):], keys, vals)
-			if found || allowed != "" {
-				return h, allowed, found
+			if h, found := c.matchInternal(method, path[len(c.prefix):], keys, vals, allowed); found {
+				return h, true
 			}
 		}
 
-		// 2. Param child — at most one per level.
+		// 2. Param children — one segment each. Patterns differing only in the
+		// param name land on separate children, so every child must be tried.
 		if len(n.children[ntParam]) > 0 {
-			c := n.children[ntParam][0]
-			slash := strings.IndexByte(path, '/')
-			var val, remaining string
-			if slash < 0 {
-				val, remaining = path, ""
-			} else {
+			val, remaining := path, ""
+			if slash := strings.IndexByte(path, '/'); slash >= 0 {
 				val, remaining = path[:slash], path[slash:]
 			}
 			if val != "" {
-				prev := len(*keys)
-				*keys = append(*keys, c.paramKey)
-				*vals = append(*vals, val)
-				h, allowed, found := c.matchInternal(method, remaining, keys, vals)
-				if found || allowed != "" {
-					return h, allowed, found
+				for _, c := range n.children[ntParam] {
+					prev := len(*keys)
+					*keys = append(*keys, c.paramKey)
+					*vals = append(*vals, val)
+					if h, found := c.matchInternal(method, remaining, keys, vals, allowed); found {
+						return h, true
+					}
+					// Backtrack.
+					*keys = (*keys)[:prev]
+					*vals = (*vals)[:prev]
 				}
-				// Backtrack.
-				*keys = (*keys)[:prev]
-				*vals = (*vals)[:prev]
 			}
 		}
 	}
 
-	// 3. Catchall child — captures any remaining path, including "".
-	if len(n.children[ntCatchAll]) > 0 {
-		c := n.children[ntCatchAll][0]
+	// 3. Catchall children — capture any remaining path, including "".
+	for _, c := range n.children[ntCatchAll] {
 		prev := len(*keys)
 		*keys = append(*keys, c.paramKey)
 		*vals = append(*vals, path)
 
 		if ep, ok := c.endpoints[method]; ok {
-			return ep.handler, "", true
-		}
-		if len(c.endpoints) > 0 {
-			return nil, allowedMethodsList(c.endpoints), false
+			return ep.handler, true
 		}
 		// Backtrack.
 		*keys = (*keys)[:prev]
 		*vals = (*vals)[:prev]
+		collectAllowedMethods(allowed, c.endpoints)
 	}
 
-	// 4. Endpoint on the current node (exact match after prefix consumed).
-	if ep, ok := n.endpoints[method]; ok {
-		return ep.handler, "", true
-	}
-	if len(n.endpoints) > 0 {
-		return nil, allowedMethodsList(n.endpoints), false
+	// 4. Endpoint on the current node — only once the whole path is consumed.
+	// Without the path == "" guard the node would also answer deeper paths,
+	// e.g. /m/{slug} serving /m/abc/x/y/z.
+	if path == "" {
+		if ep, ok := n.endpoints[method]; ok {
+			return ep.handler, true
+		}
+		collectAllowedMethods(allowed, n.endpoints)
 	}
 
-	return nil, "", false
+	return nil, false
 }
 
 // longestCommonPrefix returns the length of the longest common prefix of a and b.
@@ -237,14 +239,27 @@ func longestCommonPrefix(a, b string) int {
 	return max
 }
 
-// allowedMethodsList returns a sorted, comma-separated list of methods from an endpoints map.
-func allowedMethodsList(endpoints map[string]*treeEndpoint) string {
-	methods := make([]string, 0, len(endpoints))
+// collectAllowedMethods records the methods of a node whose path matched but
+// whose method did not — the 405 candidates for the Allow header.
+func collectAllowedMethods(allowed *[]string, endpoints map[string]*treeEndpoint) {
 	for m := range endpoints {
-		methods = append(methods, m)
+		*allowed = append(*allowed, m)
 	}
+}
+
+// joinAllowedMethods returns the sorted, de-duplicated, comma-separated Allow
+// header value. Methods may come from several branches, so duplicates are
+// possible. Mutates methods by sorting it.
+func joinAllowedMethods(methods []string) string {
 	sort.Strings(methods)
-	return strings.Join(methods, ", ")
+	uniq := make([]string, 0, len(methods))
+	for i, m := range methods {
+		if i > 0 && methods[i-1] == m {
+			continue
+		}
+		uniq = append(uniq, m)
+	}
+	return strings.Join(uniq, ", ")
 }
 
 // isStaticPattern reports whether a route pattern contains no URL parameters.

@@ -120,6 +120,27 @@ router.Get("/files/{path...}", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
+### Pencocokan Path Bersifat Persis
+
+Route hanya melayani path yang **persis** sesuai polanya. Sisa path di belakang pola tidak diabaikan — path yang lebih dalam menghasilkan `404`, sama seperti route tanpa parameter. Hanya `{path...}` yang menangkap sisa path.
+
+```go
+router.Get("/m/{slug}", showHandler)
+
+// GET /m/abc          → 200
+// GET /m/abc/x        → 404
+// GET /m/abc/x/y/z    → 404
+// GET /m/abc/         → 404 (trailing slash dianggap segmen kosong)
+```
+
+Bila memang ingin melayani seluruh sub-path, daftarkan catch-all secara eksplisit:
+
+```go
+router.Get("/m/{slug}/{rest...}", showHandler)
+```
+
+> **Catatan:** Path yang tidak cocok dengan satu pun route masih diteruskan ke `Static()` dan `SPA()`. Karena `SPA()` mendaftarkan wildcard `GET /{path...}`, aplikasi SPA akan menerima `index.html` (200), bukan `404` — perilaku yang memang diinginkan untuk route sisi klien. Bila aplikasi Anda tidak memakai `SPA()`, path tersebut berakhir `404`.
+
 ---
 
 ## Static Files & SPA
