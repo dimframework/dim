@@ -134,21 +134,21 @@ func (n *treeNode) insertParam(pattern, method string, handler HandlerFunc) {
 
 // match finds the handler and URL params for the given method+path.
 // Returns (handler, params, allowedMethods, found).
-// allowedMethods is non-empty when the path exists but the method is not registered (→ 405).
+// allowedMethods is non-empty when the path exists but the method is not
+// registered (→ 405). It is returned unsorted and possibly with duplicates so
+// the caller can merge it with candidates of its own; joinAllowedMethods turns
+// it into the header value.
 // Pre-allocates slices with capacity 4 (covers most real-world param counts without growing).
-func (n *treeNode) match(method, path string) (HandlerFunc, *routeParams, string, bool) {
+func (n *treeNode) match(method, path string) (HandlerFunc, *routeParams, []string, bool) {
 	keys := make([]string, 0, 4)
 	vals := make([]string, 0, 4)
 	var allowed []string // stays nil unless a 405 candidate is found
 
 	h, found := n.matchInternal(method, path, &keys, &vals, &allowed)
 	if found {
-		return h, &routeParams{keys: keys, vals: vals}, "", true
+		return h, &routeParams{keys: keys, vals: vals}, nil, true
 	}
-	if len(allowed) > 0 {
-		return nil, nil, joinAllowedMethods(allowed), false
-	}
-	return nil, nil, "", false
+	return nil, nil, allowed, false
 }
 
 // matchInternal is the recursive worker for match.

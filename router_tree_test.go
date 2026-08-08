@@ -78,6 +78,44 @@ func TestTreeStaticSegmentAfterParamDoesNotServeDeeperPaths(t *testing.T) {
 	}
 }
 
+// TestStaticMapMethodMissDoesNotMaskTreeRoute memastikan path yang ada di peta
+// statis tetapi tidak melayani metodenya tidak menghentikan pencarian di pohon.
+// Ini versi satu tingkat di atas dari kasus 405 yang diperbaiki di matchInternal.
+func TestStaticMapMethodMissDoesNotMaskTreeRoute(t *testing.T) {
+	router := NewRouter()
+	router.Post("/user/new", okHandler("post-static"))
+	router.Get("/user/{name}", okHandler("get-tree"))
+	router.Build()
+
+	tests := []struct {
+		method, wantBody string
+	}{
+		{http.MethodGet, "get-tree"},
+		{http.MethodPost, "post-static"},
+	}
+
+	for _, tt := range tests {
+		w := doRequest(t, router, tt.method, "/user/new")
+		if w.Code != http.StatusOK {
+			t.Errorf("%s /user/new: status = %d, want 200", tt.method, w.Code)
+			continue
+		}
+		if w.Body.String() != tt.wantBody {
+			t.Errorf("%s /user/new: body = %q, want %q", tt.method, w.Body.String(), tt.wantBody)
+		}
+	}
+
+	// Metode yang tidak dilayani peta statis maupun pohon: 405 dengan gabungan
+	// metode dari keduanya.
+	w := doRequest(t, router, http.MethodDelete, "/user/new")
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("DELETE /user/new: status = %d, want 405", w.Code)
+	}
+	if got := w.Header().Get("Allow"); got != "GET, POST" {
+		t.Errorf("Allow header = %q, want %q", got, "GET, POST")
+	}
+}
+
 // TestTreeStaticRouteIsNotAffected memastikan route tanpa parameter (peta statis)
 // tetap berperilaku sama.
 func TestTreeStaticRouteIsNotAffected(t *testing.T) {

@@ -141,6 +141,41 @@ router.Get("/m/{slug}/{rest...}", showHandler)
 
 > **Catatan:** Path yang tidak cocok dengan satu pun route masih diteruskan ke `Static()` dan `SPA()`. Karena `SPA()` mendaftarkan wildcard `GET /{path...}`, aplikasi SPA akan menerima `index.html` (200), bukan `404` — perilaku yang memang diinginkan untuk route sisi klien. Bila aplikasi Anda tidak memakai `SPA()`, path tersebut berakhir `404`.
 
+### Redirect Trailing Slash
+
+Slash di akhir adalah segmen tersendiri: `/users` dan `/users/` dua path berbeda, dan yang tidak terdaftar berakhir `404`. Aktifkan `RedirectTrailingSlash` bila ingin salah satunya diarahkan ke yang lain.
+
+```go
+router := dim.NewRouter()
+router.RedirectTrailingSlash(true)   // panggil sebelum Build()
+
+router.Get("/users/{id}", getUserHandler)
+router.Get("/blog/{slug}/", showPostHandler)   // sengaja didaftarkan dengan slash
+
+// GET  /users/7/   → 301 Location: /users/7
+// GET  /blog/go/   → 200
+// GET  /blog/go    → 301 Location: /blog/go/
+// GET  /users/7/?page=2 → 301 Location: /users/7?page=2
+```
+
+**Perilaku**:
+
+- **Nonaktif secara default.** Tanpa opsi ini, tidak ada redirect sama sekali.
+- **Redirect hanya terjadi bila padanannya punya handler untuk metode yang sama.** `POST /users/7/` pada route yang hanya melayani `GET` tetap `404`, bukan redirect ke path yang juga akan gagal.
+- **`405` didahulukan.** Path yang memang terdaftar — hanya dengan metode lain — dijawab `405`; path itu bukan salah ketik yang perlu dikanonikalisasi.
+- **HEAD perlu didaftarkan sendiri.** Sama seperti route pada umumnya, registrasi `GET` tidak otomatis melayani `HEAD`. Bila klien atau perayap memvalidasi URL lewat `HEAD`, daftarkan `router.Head(...)` agar redirect ikut berlaku.
+- **`301` untuk GET dan HEAD**, agar mesin pencari mengambil satu URL kanonik. **`308` untuk metode lain**, agar klien mempertahankan metode dan body — `301` membuat sebagian klien mengubah `POST` menjadi `GET`.
+- **Query string ikut terbawa.**
+- **`/` tidak pernah diredirect** ke path kosong.
+- Diperiksa **sebelum** fallback `Static()` dan `SPA()`, sehingga wildcard SPA tidak menelan path yang sebenarnya punya padanan.
+
+Alternatifnya, daftarkan kedua bentuk ke handler yang sama bila hanya satu-dua route yang perlu toleran:
+
+```go
+router.Get("/users/{id}", getUserHandler)
+router.Get("/users/{id}/", getUserHandler)
+```
+
 ---
 
 ## Static Files & SPA

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/atfromhome/goreus/pkg/cache"
@@ -33,15 +33,16 @@ type staticEntry struct {
 //   - Dynamic routes (dengan {param} atau {path...}): O(k) radix tree traversal
 //   - Static file / SPA: dilayani oleh http.ServeMux sebagai fallback
 type Router struct {
-	mux           *http.ServeMux          // fallback untuk Static() dan SPA()
-	staticRoutes  map[string]*staticEntry // O(1) map untuk path tanpa parameter
-	tree          *treeNode               // radix tree untuk path dengan parameter
-	middleware    []MiddlewareFunc
-	cachedHandler http.Handler
-	initialized   bool
-	lock          sync.RWMutex
-	routes        []RouteInfo                               // Semua route yang terdaftar
-	routeCache    *cache.InMemoryCache[string, []RouteInfo] // Cache untuk GetRoutes()
+	mux                   *http.ServeMux          // fallback untuk Static() dan SPA()
+	staticRoutes          map[string]*staticEntry // O(1) map untuk path tanpa parameter
+	tree                  *treeNode               // radix tree untuk path dengan parameter
+	middleware            []MiddlewareFunc
+	cachedHandler         http.Handler
+	initialized           bool
+	redirectTrailingSlash atomic.Bool // read on every unmatched request
+	lock                  sync.RWMutex
+	routes                []RouteInfo                               // Semua route yang terdaftar
+	routeCache            *cache.InMemoryCache[string, []RouteInfo] // Cache untuk GetRoutes()
 }
 
 // NewRouter membuat instance router baru menggunakan stdlib http.ServeMux.
@@ -84,6 +85,42 @@ func (r *Router) Use(middleware ...MiddlewareFunc) {
 	// Invalidate cached handler
 	r.cachedHandler = nil
 	r.initialized = false
+}
+
+// RedirectTrailingSlash mengatur apakah path yang tidak cocok diredirect ke
+// padanannya yang hanya berbeda pada slash di akhir. Nonaktif secara default.
+//
+// Pencocokan route bersifat persis: `/users` dan `/users/` adalah dua path
+// berbeda, dan yang tidak terdaftar berakhir `404`. Dengan opsi ini aktif,
+// router memeriksa padanannya terlebih dahulu — bila padanan itu punya handler
+// untuk metode yang sama, klien diarahkan ke sana alih-alih menerima `404`.
+//
+// Redirect memakai `301 Moved Permanently` untuk GET dan HEAD agar mesin
+// pencari mengambil satu URL kanonik, dan `308 Permanent Redirect` untuk metode
+// lain agar metode beserta body-nya dipertahankan klien. Query string ikut
+// terbawa.
+//
+// Path yang memang terdaftar — hanya dengan metode lain — tetap dijawab `405`,
+// bukan diredirect: path itu bukan salah ketik yang perlu dikanonikalisasi.
+// Redirect diperiksa setelah itu, dan sebelum fallback ke Static() dan SPA().
+//
+// Seperti route pada umumnya, HEAD tidak dilayani otomatis oleh registrasi GET.
+// Bila klien memakai HEAD untuk memvalidasi URL, daftarkan route HEAD-nya
+// dengan router.Head agar redirect ikut berlaku.
+//
+// Aman dipanggil kapan saja, termasuk saat server sudah melayani request.
+//
+// Parameter:
+//   - enabled: true untuk mengaktifkan redirect
+//
+// Contoh:
+//
+//	router := dim.NewRouter()
+//	router.RedirectTrailingSlash(true)
+//	router.Get("/users/{id}", getUserHandler)
+//	// GET /users/7/ → 301 Location: /users/7
+func (r *Router) RedirectTrailingSlash(enabled bool) {
+	r.redirectTrailingSlash.Store(enabled)
 }
 
 // Build membuild handler chain secara eksplisit.
@@ -388,24 +425,21 @@ func (r *Router) serveTree(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
 	// 1. Static map — O(1) lookup for parameter-free routes.
+	// A path registered under a different method is only a 405 candidate: a
+	// tree route may still handle this method, so the search continues.
+	var allowed []string
 	if entry, ok := r.staticRoutes[path]; ok {
 		if h, ok := entry.handlers[method]; ok {
 			h(w, req)
 			return
 		}
-		// Path matched but method not registered → 405.
-		allowed := make([]string, 0, len(entry.handlers))
 		for m := range entry.handlers {
 			allowed = append(allowed, m)
 		}
-		sort.Strings(allowed)
-		w.Header().Set("Allow", strings.Join(allowed, ", "))
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
 	}
 
 	// 2. Radix tree — O(k) for routes with {param} or {path...}.
-	h, params, allowed, found := r.tree.match(method, path)
+	h, params, treeAllowed, found := r.tree.match(method, path)
 	if found {
 		if params != nil && len(params.keys) > 0 {
 			req = setRouteParams(req, params)
@@ -413,14 +447,71 @@ func (r *Router) serveTree(w http.ResponseWriter, req *http.Request) {
 		h(w, req)
 		return
 	}
-	if allowed != "" {
-		w.Header().Set("Allow", allowed)
+	allowed = append(allowed, treeAllowed...)
+
+	// 3. Method Not Allowed — the path itself is registered, so it is not a
+	// mistyped URL. Answering 405 here also keeps it ahead of the redirect below.
+	if len(allowed) > 0 {
+		w.Header().Set("Allow", joinAllowedMethods(allowed))
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 3. Fallback to mux for Static() and SPA() routes.
+	// 4. Trailing-slash redirect — before the mux fallback, whose SPA wildcard
+	// would otherwise swallow every remaining path.
+	if r.redirectTrailingSlash.Load() {
+		if target, ok := r.trailingSlashCounterpart(method, path); ok {
+			redirectTrailingSlash(w, req, target)
+			return
+		}
+	}
+
+	// 5. Fallback to mux for Static() and SPA() routes.
 	r.mux.ServeHTTP(w, req)
+}
+
+// trailingSlashCounterpart returns the same path with its trailing slash added
+// or removed, but only when that counterpart has a handler for method.
+// Redirecting to a path that still fails would only cost the client a round trip.
+func (r *Router) trailingSlashCounterpart(method, path string) (string, bool) {
+	if len(path) < 2 {
+		// "" and "/" have no counterpart worth redirecting to.
+		return "", false
+	}
+
+	var counterpart string
+	if path[len(path)-1] == '/' {
+		counterpart = path[:len(path)-1]
+	} else {
+		counterpart = path + "/"
+	}
+
+	if entry, ok := r.staticRoutes[counterpart]; ok {
+		if _, ok := entry.handlers[method]; ok {
+			return counterpart, true
+		}
+		// The static map holds this path under other methods only; a tree route
+		// may still cover it, so fall through instead of giving up here.
+	}
+	if _, _, _, found := r.tree.match(method, counterpart); found {
+		return counterpart, true
+	}
+	return "", false
+}
+
+// redirectTrailingSlash sends the client to target, preserving the query string.
+// GET and HEAD get 301 so crawlers settle on one canonical URL; other methods
+// get 308, which — unlike 301 — clients may not rewrite into a GET.
+func redirectTrailingSlash(w http.ResponseWriter, req *http.Request, target string) {
+	code := http.StatusPermanentRedirect
+	if req.Method == http.MethodGet || req.Method == http.MethodHead {
+		code = http.StatusMovedPermanently
+	}
+
+	u := *req.URL
+	u.Path = target
+	u.RawPath = "" // stale against the new Path; let EscapedPath re-encode
+	http.Redirect(w, req, u.RequestURI(), code)
 }
 
 // ServeHTTP mengimplementasikan antarmuka http.Handler untuk menangani permintaan HTTP.
