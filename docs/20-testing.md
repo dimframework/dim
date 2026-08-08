@@ -460,6 +460,35 @@ func setupTestDatabase(t *testing.T) Database {
 }
 ```
 
+### Cost bcrypt di Test
+
+`dim.HashPassword` memakai `dim.BcryptCost`, bawaannya `12` — tepat untuk produksi, tetapi mahal di test. bcrypt Go murni adalah gelung akses memori yang rapat, dan race detector menginstrumentasi setiap akses:
+
+| cost | tanpa `-race` | dengan `-race` |
+|---|---|---|
+| 12 (bawaan) | 216 ms | **1,91 dtk** |
+| 8 | 11,4 ms | 118 ms |
+| 6 | 2,9 ms | 29,6 ms |
+
+Angka itu **per hash**. Test yang menembak endpoint login sampai rate limit-nya menutup, atau yang menguji kesetaraan waktu-tanggap antara email tak dikenal dan kata sandi salah, memanggil bcrypt puluhan kali — cukup untuk menembus batas 10 menit bawaan `go test` dan mati sebagai `panic: test timed out`.
+
+Turunkan sekali di `TestMain`, sebelum test mana pun berjalan:
+
+```go
+func TestMain(m *testing.M) {
+    dim.BcryptCost = 6
+    os.Exit(m.Run())
+}
+```
+
+> **Berhentilah di 6 atau 8.** Test kesetaraan waktu-tanggap masih lulus pada cost 4, tetapi selisih yang diukurnya menyusut mendekati derau — testnya jadi rapuh, bukan cepat.
+
+> **Jangan menurunkannya di produksi**, dan jangan menyambungkannya ke environment. Satu salah ketik akan melemahkan setiap kata sandi tanpa galat dan tanpa gejala, dan baru ketahuan setelah basis data bocor.
+
+Setel sekali di awal. Nilainya dibaca setiap kali `HashPassword` dipanggil, jadi mengubahnya sementara request sedang dilayani adalah data race.
+
+Cost di luar rentang bcrypt (`4..31`) membuat `HashPassword` mengembalikan galat. Ini disengaja: bcrypt menukar cost di bawah `4` dengan `10` tanpa galat, sehingga `dim.BcryptCost = cfg.BcryptCost` yang field-nya tidak terisi akan melemahkan setiap kata sandi tanpa gejala apa pun.
+
 ### Helper Functions
 
 ```go

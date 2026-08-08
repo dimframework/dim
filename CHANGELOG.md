@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`BcryptCost` kini `var`, bukan `const`**: Sebagai `const` ia tidak dapat ditimpa dari luar paket — tidak lewat `TestMain`, tidak lewat build tag, tidak lewat apa pun selain fork atau `replace`. Bawaannya tetap `12`, sehingga tidak ada perubahan perilaku bagi yang tidak menyentuhnya. Closes [#18](https://github.com/dimframework/dim/issues/18).
+  - **Alasannya biaya di bawah `-race`**: bcrypt Go murni adalah gelung akses memori yang rapat, dan race detector menginstrumentasi setiap akses. Terukur di mesin pengembang, **per hash**: cost 12 → 216 ms tanpa `-race` tetapi **1,91 dtk** dengan `-race`; cost 6 → 2,9 ms dan 29,6 ms. Test yang menembak endpoint login sampai rate limit menutup, atau yang menguji kesetaraan waktu-tanggap antara email tak dikenal dan kata sandi salah, memanggil bcrypt puluhan kali — cukup untuk menembus batas 10 menit bawaan `go test` dan mati sebagai `panic: test timed out` alih-alih melaporkan hasil.
+  - Pemakai menurunkannya sekali di `TestMain`: `dim.BcryptCost = 6`. Sebaiknya berhenti di 6 atau 8 — pada cost 4 test kesetaraan waktu-tanggap masih lulus tetapi selisih yang diukurnya menyusut mendekati derau.
+  - **Sengaja `var`, bukan dibaca dari environment.** Cost yang dapat disetel lewat env membuat satu salah ketik di produksi melemahkan setiap kata sandi — tanpa galat, tanpa gejala, dan baru ketahuan setelah basis data bocor. Sebagai `var`, ia hanya berubah oleh kode yang memang ditulis untuk mengubahnya.
+  - Nilainya dibaca setiap kali `HashPassword` dipanggil. Setel sekali sebelum melayani request; mengubahnya saat request berjalan adalah data race.
+- **`HashPassword` menolak `BcryptCost` di luar rentang `4..31`**: Konsekuensi langsung dari membuat nilainya dapat ditulis. bcrypt menukar cost di bawah `MinCost` dengan `DefaultCost`-nya sendiri (`10`) tanpa mengembalikan galat, sehingga `dim.BcryptCost = cfg.BcryptCost` dengan field yang tidak terisi — bernilai `0` — akan menghasilkan cost `10`, bukan `12`, tanpa galat dan tanpa gejala. Persis jenis pelemahan senyap yang alasan `var` ini justru ingin dihindari, jadi salah setel kini berbunyi. Cost di atas `31` memang sudah ditolak bcrypt sendiri; kini keduanya berperilaku sama.
+
+### Testing
+- **Test untuk `BcryptCost`** (baru): menjaga bawaan tetap `12` lewat konstanta `defaultBcryptCost` — diperiksa terhadap konstanta, bukan terhadap nilai saat test berjalan, agar tetap bermakna bila suatu saat paket ini sendiri menurunkan cost lewat `TestMain`. Ditambah satu test yang memastikan nilainya benar-benar sampai ke hash (dibaca ulang lewat `bcrypt.Cost`), dan satu yang menjaga penolakan cost di luar rentang.
+
 ---
 
 ## [v0.9.0] - 2026-08-08
