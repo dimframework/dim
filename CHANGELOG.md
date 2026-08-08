@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.9.0] - 2026-08-08
+
 ### Added
 - **`Router.RedirectTrailingSlash(enabled bool)`** (baru): Mengarahkan path yang tidak cocok ke padanannya yang hanya berbeda pada slash di akhir — `/users/7/` → `/users/7`, dan sebaliknya bila pola memang didaftarkan dengan slash. **Nonaktif secara default**, sehingga tidak ada perubahan perilaku bagi yang tidak memakainya.
   - Redirect hanya dilakukan bila padanannya benar-benar punya handler untuk metode yang sama. `POST /users/7/` pada route yang hanya melayani `GET` tetap `404` alih-alih diarahkan ke path yang juga akan gagal.
@@ -26,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Anak parameter kedua pada level yang sama tak pernah terjangkau**: Pencocokan hanya mencoba anak parameter pertama, sedangkan pola yang hanya berbeda nama parameternya menghasilkan node terpisah. Dengan `/a/{id}` dan `/a/{slug}/edit` terdaftar, `/a/5/edit` tidak pernah sampai ke handler-nya. Seluruh anak parameter (dan catch-all) kini dicoba dengan backtracking, seperti anak statis.
 
 ### Testing
-- **`router_tree_test.go`** (baru): Menguji pohon radix secara terpisah dari peta statis — kedalaman path, trailing slash, catch-all, `405` beserta header `Allow`, backtracking antar cabang, dan kebocoran parameter.
+- **`router_tree_test.go`** (baru): Menguji pohon radix secara terpisah dari peta statis — kedalaman path, trailing slash, catch-all, `405` beserta header `Allow`, backtracking antar cabang, dan kebocoran parameter. Jalur pencocokan keduanya berbeda, sehingga test yang hanya memakai route statis tidak akan pernah menyentuh pohon.
+- **`router_redirect_test.go`** (baru): Menguji `RedirectTrailingSlash` — default nonaktif, kedua arah redirect, query string, `308`, syarat metode, prioritas `405`, root, urutan terhadap fallback SPA, dan toggle konkuren di bawah `-race`.
 
 ---
 
