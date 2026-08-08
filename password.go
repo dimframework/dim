@@ -10,12 +10,43 @@ import (
 const (
 	// MinPasswordLength is the minimum required password length
 	MinPasswordLength = 8
-	// BcryptCost is the bcrypt cost factor
-	BcryptCost = 12
+	// defaultBcryptCost is the production default BcryptCost is initialized to.
+	// Kept separate so the default stays checkable after BcryptCost is lowered.
+	defaultBcryptCost = 12
 )
 
+// BcryptCost adalah cost factor bcrypt yang dipakai HashPassword. Bawaannya 12.
+//
+// Ia var, bukan const, semata agar test dapat menurunkannya. bcrypt Go murni
+// adalah gelung akses memori yang rapat, dan race detector menginstrumentasi
+// setiap akses — pada cost 12 satu hash memakan ±200 ms, dan ±2 dtk di bawah
+// `-race`. Suite yang menguji rate limit atau kesetaraan waktu-tanggap login
+// memanggilnya puluhan kali, cukup untuk menembus batas 10 menit bawaan
+// `go test` dan mati sebagai timeout alih-alih melaporkan hasil.
+//
+// Turunkan sekali di TestMain, sebelum test mana pun berjalan:
+//
+//	func TestMain(m *testing.M) {
+//		dim.BcryptCost = 6
+//		os.Exit(m.Run())
+//	}
+//
+// Berhentilah di 6 atau 8. Pada cost 4 test kesetaraan waktu-tanggap masih
+// lulus, tetapi selisih yang diukurnya menyusut mendekati derau.
+//
+// Jangan menurunkannya di produksi, dan jangan menyambungkannya ke environment:
+// satu salah ketik akan melemahkan setiap kata sandi tanpa galat dan tanpa
+// gejala, dan baru ketahuan setelah basis data bocor. Sebagai var, ia hanya
+// berubah oleh kode yang memang ditulis untuk mengubahnya.
+//
+// Nilainya dibaca setiap kali HashPassword dipanggil, jadi setel sekali di awal
+// dan jangan mengubahnya sementara request sedang dilayani. Nilai di luar
+// rentang bcrypt (4..31) membuat HashPassword mengembalikan galat, bukan diam-
+// diam memakai angka lain.
+var BcryptCost = defaultBcryptCost
+
 // HashPassword melakukan hash password menggunakan bcrypt algorithm.
-// Menggunakan BcryptCost constant untuk set hashing difficulty level.
+// Membaca BcryptCost untuk set hashing difficulty level.
 //
 // Parameters:
 //   - password: plaintext password yang akan di-hash
@@ -31,7 +62,16 @@ const (
 //	  return err
 //	}
 func HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
+	// Dibaca sekali agar cost yang divalidasi adalah cost yang dipakai.
+	// bcrypt menukar cost di bawah MinCost dengan DefaultCost-nya sendiri tanpa
+	// galat, sehingga BcryptCost yang tak sengaja bernilai 0 akan melemahkan
+	// setiap kata sandi tanpa gejala. Ditolak di sini agar salah setel berbunyi.
+	cost := BcryptCost
+	if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
+		return "", fmt.Errorf("failed to hash password: BcryptCost %d di luar rentang %d..%d", cost, bcrypt.MinCost, bcrypt.MaxCost)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}

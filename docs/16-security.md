@@ -135,6 +135,23 @@ func verifyPassword(hash, password string) error {
 }
 ```
 
+Atau pakai helper dim, yang memakai cost `12`:
+
+```go
+hash, err := dim.HashPassword(password)
+if err != nil {
+    return err
+}
+
+// Verifikasi saat login — galatnya menentukan lolos atau tidak,
+// jadi jangan pernah dibuang.
+if err := dim.VerifyPassword(hash, password); err != nil {
+    return dim.NewAppError("Kredensial tidak valid", 401)
+}
+```
+
+> `dim.BcryptCost` berupa `var` agar test dapat menurunkannya — lihat [Testing](20-testing.md#cost-bcrypt-di-test). Jangan menurunkannya di produksi, dan jangan menyambungkannya ke config atau environment: satu field yang tidak terisi bernilai `0`, dan cost di bawah `4` ditukar diam-diam oleh bcrypt dengan `10`. `HashPassword` menolak cost di luar rentang `4..31` justru agar salah setel seperti itu berbunyi, bukan melemahkan kata sandi tanpa gejala.
+
 ### ❌ DON'T: Weak Password Hashing
 
 ```go

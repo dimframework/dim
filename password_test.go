@@ -2,7 +2,69 @@ package dim
 
 import (
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+// TestBcryptCostDefault menjaga bawaan produksi. Diperiksa terhadap konstanta,
+// bukan terhadap BcryptCost saat test berjalan, agar tetap bermakna bila suatu
+// saat paket ini menurunkan cost lewat TestMain seperti yang didokumentasikan.
+func TestBcryptCostDefault(t *testing.T) {
+	if defaultBcryptCost != 12 {
+		t.Errorf("defaultBcryptCost = %d, want 12", defaultBcryptCost)
+	}
+}
+
+// TestHashPasswordUsesBcryptCost memastikan BcryptCost benar-benar dipakai saat
+// hashing — inilah yang membuat penurunan cost di TestMain berefek.
+//
+// Menulis global yang dibaca HashPassword. Aman karena tidak ada satu pun test
+// di paket ini yang memakai t.Parallel(); bila itu berubah, test ini perlu
+// dipindahkan ke jalur yang tidak menyentuh global.
+func TestHashPasswordUsesBcryptCost(t *testing.T) {
+	original := BcryptCost
+	t.Cleanup(func() { BcryptCost = original })
+
+	BcryptCost = bcrypt.MinCost
+
+	hash, err := HashPassword("TestPassword123!")
+	if err != nil {
+		t.Fatalf("HashPassword() error = %v", err)
+	}
+
+	cost, err := bcrypt.Cost([]byte(hash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost() error = %v", err)
+	}
+	if cost != bcrypt.MinCost {
+		t.Errorf("cost hash = %d, want %d", cost, bcrypt.MinCost)
+	}
+
+	// Hash dengan cost rendah tetap harus dapat diverifikasi.
+	if err := VerifyPassword(hash, "TestPassword123!"); err != nil {
+		t.Errorf("VerifyPassword() gagal untuk hash cost %d: %v", bcrypt.MinCost, err)
+	}
+}
+
+// TestHashPasswordRejectsOutOfRangeCost menjaga lubang yang terbuka begitu
+// BcryptCost dapat ditulis: bcrypt menukar cost di bawah MinCost dengan
+// DefaultCost-nya sendiri (10) tanpa galat. Sebuah field config yang tidak
+// terisi — `dim.BcryptCost = cfg.BcryptCost` yang bernilai 0 — akan melemahkan
+// setiap kata sandi tanpa gejala apa pun. Cost di luar rentang harus gagal.
+func TestHashPasswordRejectsOutOfRangeCost(t *testing.T) {
+	original := BcryptCost
+	t.Cleanup(func() { BcryptCost = original })
+
+	for _, cost := range []int{0, -1, bcrypt.MinCost - 1, bcrypt.MaxCost + 1} {
+		BcryptCost = cost
+
+		hash, err := HashPassword("TestPassword123!")
+		if err == nil {
+			actual, _ := bcrypt.Cost([]byte(hash))
+			t.Errorf("BcryptCost = %d: HashPassword() err = nil (hash cost %d), want error", cost, actual)
+		}
+	}
+}
 
 func TestHashPassword(t *testing.T) {
 	password := "TestPassword123!"
