@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.10.0] - 2026-08-08
+
 ### Changed
 - **`BcryptCost` kini `var`, bukan `const`**: Sebagai `const` ia tidak dapat ditimpa dari luar paket — tidak lewat `TestMain`, tidak lewat build tag, tidak lewat apa pun selain fork atau `replace`. Bawaannya tetap `12`, sehingga tidak ada perubahan perilaku bagi yang tidak menyentuhnya. Closes [#18](https://github.com/dimframework/dim/issues/18).
+  - ⚠️ **Catatan kompatibilitas**: `var` tidak dapat dipakai dalam ekspresi konstanta. Kode seperti `const myCost = dim.BcryptCost` atau `[dim.BcryptCost]byte{}` berhenti terkompilasi dan perlu diganti dengan variabel biasa. Pemakaian sebagai nilai — yang praktis mencakup semua pemakaian nyata — tidak terdampak.
   - **Alasannya biaya di bawah `-race`**: bcrypt Go murni adalah gelung akses memori yang rapat, dan race detector menginstrumentasi setiap akses. Terukur di mesin pengembang, **per hash**: cost 12 → 216 ms tanpa `-race` tetapi **1,91 dtk** dengan `-race`; cost 6 → 2,9 ms dan 29,6 ms. Test yang menembak endpoint login sampai rate limit menutup, atau yang menguji kesetaraan waktu-tanggap antara email tak dikenal dan kata sandi salah, memanggil bcrypt puluhan kali — cukup untuk menembus batas 10 menit bawaan `go test` dan mati sebagai `panic: test timed out` alih-alih melaporkan hasil.
   - Pemakai menurunkannya sekali di `TestMain`: `dim.BcryptCost = 6`. Sebaiknya berhenti di 6 atau 8 — pada cost 4 test kesetaraan waktu-tanggap masih lulus tetapi selisih yang diukurnya menyusut mendekati derau.
   - **Sengaja `var`, bukan dibaca dari environment.** Cost yang dapat disetel lewat env membuat satu salah ketik di produksi melemahkan setiap kata sandi — tanpa galat, tanpa gejala, dan baru ketahuan setelah basis data bocor. Sebagai `var`, ia hanya berubah oleh kode yang memang ditulis untuk mengubahnya.
