@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.11.0] - 2026-08-22
+
+### Added
+- **`GetAllMigrations()`**: Mengembalikan gabungan migrasi framework dan migrasi aplikasi yang terdaftar via `Register()`, terurut berdasarkan `Version`. Dimaksudkan sebagai sumber tunggal urutan migrasi, sehingga `migrate`, `migrate:list`, dan `migrate:rollback` melihat urutan yang sama.
+- **Flag `-allow-missing` pada `migrate:rollback`**: Meneruskan rollback dengan melewati migrasi yang tercatat di database tetapi kodenya tidak ada di registry. Tanpa flag ini perintahnya menolak berjalan — flag-nya menjadi jalan keluar bagi yang memang punya migrasi yatim dan tanpa itu akan terkunci dari rollback sama sekali.
+
 ### Fixed
 - **`GetRegisteredMigrations()` tidak mengurutkan berdasarkan `Version`**: Doc comment-nya menjanjikan pengurutan, tetapi fungsinya hanya menyalin slice registry. Urutan jalan migrasi menjadi urutan `dim.Register()` dipanggil — yakni urutan `init()` package — bukan urutan `Version`. Closes [#20](https://github.com/dimframework/dim/issues/20).
   - Aplikasi yang menaruh seluruh migrasinya di **satu** package selamat tanpa menyadarinya: Go menjalankan `init()` sebuah package menurut urutan nama berkas, dan konvensi penamaan `20260802100100_create_partners_table.go` membuat urutan nama = urutan versi. Benar karena kebetulan, bukan karena dijamin.
