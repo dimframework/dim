@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`GetRegisteredMigrations()` tidak mengurutkan berdasarkan `Version`**: Doc comment-nya menjanjikan pengurutan, tetapi fungsinya hanya menyalin slice registry. Urutan jalan migrasi menjadi urutan `dim.Register()` dipanggil — yakni urutan `init()` package — bukan urutan `Version`. Closes [#20](https://github.com/dimframework/dim/issues/20).
+  - Aplikasi yang menaruh seluruh migrasinya di **satu** package selamat tanpa menyadarinya: Go menjalankan `init()` sebuah package menurut urutan nama berkas, dan konvensi penamaan `20260802100100_create_partners_table.go` membuat urutan nama = urutan versi. Benar karena kebetulan, bukan karena dijamin.
+  - Menggigit begitu migrasi tersebar ke lebih dari satu package — aplikasi modular yang tiap modulnya membawa migrasinya sendiri lalu di-blank-import dari `cmd/app`. Migrasi bernomor lebih besar dapat berjalan lebih dulu, dan `CREATE TABLE` ber-`REFERENCES` ke tabel yang belum lahir gagal.
+  - Sulit ketahuan karena `RunMigrations` melewati versi yang sudah tercatat: **database yang sudah terisi tidak pernah menunjukkannya.** Yang gagal hanya database segar — deploy pertama di lingkungan baru, dan test yang membangun skema dari nol.
+  - Pengurutan bersifat stabil, sehingga migrasi dengan `Version` kembar tetap mengikuti urutan pendaftarannya alih-alih berubah-ubah.
+  - Ditambahkan `GetAllMigrations()` yang menggabungkan migrasi framework dan migrasi aplikasi lalu mengurutkan **slice gabungannya**. `migrate`, `migrate:list`, dan `migrate:rollback` kini memakainya sebagai sumber tunggal urutan. Sebelumnya ketiganya menyambung dengan `append(GetFrameworkMigrations(), GetRegisteredMigrations()...)` yang urut hanya karena versi framework kebetulan selalu lebih kecil.
+  - `migrate:rollback` tidak pernah terdampak dan tetap berjalan menurun: urutannya berasal dari `ORDER BY version DESC` pada query, bukan dari registry, yang hanya dipakai untuk mencari fungsi `Down` berdasarkan versi.
+- **`migrate:rollback` membongkar migrasi yang lebih tua saat ada migrasi yang kodenya hilang**: Baris yang tercatat di tabel `migrations` tetapi tidak ada di registry hanya diberi peringatan lalu dilewati, sementara rollback lanjut ke migrasi di bawahnya. Skema milik migrasi yang dilewati tetap hidup sementara dependensinya ikut dibongkar — kebalikan dari masalah urutan di atas.
+  - Perintah kini **menolak berjalan dan tidak menyentuh apa pun** bila ada migrasi target yang fungsi `Down`-nya tidak tersedia, dengan menyebut versi mana yang bermasalah.
+  - Flag baru **`-allow-missing`** menyediakan jalan keluar bagi yang memang punya migrasi yatim dan ingin melewatinya; tanpa itu, mereka akan terkunci dari rollback sama sekali.
+  - Pesan "Rolling back N migration(s)" kini memakai jumlah sebenarnya, bukan nilai `-step` mentah — sebelumnya `-step 3` yang hanya mengerjakan 2 tetap melaporkan 3.
+- **`migrate:list` salah menghitung `Pending`**: Rumusnya `len(migrations) - len(appliedMap)`, sehingga versi yang tercatat di database tetapi tidak ada di registry ikut mengurangi hitungan — angkanya bisa keliru, bahkan negatif. Dengan registry `{100, 200, 400}` dan database `{100, 200, 300}`, keluarannya berbunyi `Applied: 3 | Pending: 0` padahal migrasi `400` belum pernah dijalankan.
+  - Hitungan kini diambil dengan menelusuri registry, bukan dari `len()`.
+  - Versi yang hanya ada di database ditampilkan sebagai baris berstatus **`Orphan`** beserta ringkasannya sendiri. Sengaja dimunculkan, bukan disembunyikan: inilah yang menjelaskan mengapa `migrate:rollback` menolak berjalan.
+
 ---
 
 ## [v0.10.0] - 2026-08-08
