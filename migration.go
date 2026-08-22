@@ -1,10 +1,12 @@
 package dim
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 )
 
 // Migration represents a single migration
@@ -38,12 +40,35 @@ func DisableFrameworkMigrations() {
 }
 
 // GetRegisteredMigrations mengembalikan semua migration yang terdaftar via Register().
-// Migration akan otomatis diurutkan berdasarkan Version.
+// Migration akan otomatis diurutkan berdasarkan Version, sehingga urutan jalannya
+// tidak bergantung pada urutan init() antar package.
 func GetRegisteredMigrations() []Migration {
 	// Kopi slice untuk menghindari side effects modifikasi eksternal
 	migrations := make([]Migration, len(migrationRegistry))
 	copy(migrations, migrationRegistry)
+	sortMigrations(migrations)
 	return migrations
+}
+
+// GetAllMigrations mengembalikan gabungan migrasi framework dan migrasi aplikasi
+// yang terdaftar via Register(), diurutkan berdasarkan Version.
+//
+// Gunakan fungsi ini sebagai sumber tunggal urutan migrasi agar `migrate`,
+// `migrate:list`, dan `migrate:rollback` melihat urutan yang sama.
+func GetAllMigrations() []Migration {
+	migrations := GetFrameworkMigrations()
+	migrations = append(migrations, migrationRegistry...)
+	sortMigrations(migrations)
+	return migrations
+}
+
+// sortMigrations mengurutkan migrations berdasarkan Version secara menaik.
+// Pengurutan bersifat stabil sehingga migrasi dengan Version yang sama
+// tetap mengikuti urutan pendaftarannya.
+func sortMigrations(migrations []Migration) {
+	slices.SortStableFunc(migrations, func(a, b Migration) int {
+		return cmp.Compare(a.Version, b.Version)
+	})
 }
 
 // GetFrameworkMigrations mengembalikan semua migrasi bawaan framework dim (User, Token, RateLimit).

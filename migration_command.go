@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -54,9 +55,8 @@ func (c *MigrateCommand) Execute(ctx *CommandContext) error {
 		fmt.Println("Running migrations in verbose mode...")
 	}
 
-	migrations := GetFrameworkMigrations()
-	// Combine with registered migrations (from auto-discovery)
-	migrations = append(migrations, GetRegisteredMigrations()...)
+	// Gabungan migrasi framework + migrasi terdaftar, terurut berdasarkan Version
+	migrations := GetAllMigrations()
 
 	if c.verbose {
 		fmt.Printf("Found %d total migrations\n", len(migrations))
@@ -76,8 +76,9 @@ func (c *MigrateCommand) Execute(ctx *CommandContext) error {
 
 // MigrateRollbackCommand membatalkan migration yang sudah dijalankan.
 type MigrateRollbackCommand struct {
-	steps int
-	force bool
+	steps        int
+	force        bool
+	allowMissing bool
 }
 
 func (c *MigrateRollbackCommand) Name() string {
@@ -91,6 +92,7 @@ func (c *MigrateRollbackCommand) Description() string {
 func (c *MigrateRollbackCommand) DefineFlags(fs *flag.FlagSet) {
 	fs.IntVar(&c.steps, "step", 1, "Number of migrations to rollback")
 	fs.BoolVar(&c.force, "force", false, "Skip confirmation prompt")
+	fs.BoolVar(&c.allowMissing, "allow-missing", false, "Proceed even if some migrations are missing from the registry (skips them)")
 }
 
 func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
@@ -104,9 +106,9 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 
 	db := migrationConn(ctx)
 
-	fmt.Printf("Rolling back %d migration(s)...\n", c.steps)
-
-	// Get applied migrations
+	// Ambil N migrasi terakhir dari database, terbaru lebih dulu.
+	// Urutan rollback ditentukan oleh query ini (menurun), bukan oleh urutan
+	// registry — kebalikan dari `migrate` yang berjalan menaik.
 	query := `SELECT version, name FROM migrations ORDER BY version DESC LIMIT $1`
 	rows, err := db.Query(context.Background(), query, c.steps)
 	if err != nil {
@@ -114,11 +116,13 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 	}
 	defer rows.Close()
 
-	// Collect migrations to rollback
+	// Kumpulkan migrasi yang akan di-rollback
 	var migrationsToRollback []Migration
-	frameworkMigrations := GetFrameworkMigrations()
-	// Add registered migrations
-	frameworkMigrations = append(frameworkMigrations, GetRegisteredMigrations()...)
+	var missing []MigrationHistory
+	byVersion := make(map[int64]Migration)
+	for _, migration := range GetAllMigrations() {
+		byVersion[migration.Version] = migration
+	}
 
 	for rows.Next() {
 		var version int64
@@ -127,25 +131,43 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 			return err
 		}
 
-		// Find migration in registered migrations
-		found := false
-		for _, migration := range frameworkMigrations {
-			if migration.Version == version {
-				migrationsToRollback = append(migrationsToRollback, migration)
-				found = true
-				break
-			}
-		}
-
+		migration, found := byVersion[version]
 		if !found {
-			fmt.Printf("⚠ Warning: Migration '%s' (version %d) not found in registered migrations\n", name, version)
+			// Kode migrasinya sudah tidak ada — fungsi Down-nya tidak bisa dijalankan
+			missing = append(missing, MigrationHistory{Version: version, Name: name})
+			continue
 		}
+		migrationsToRollback = append(migrationsToRollback, migration)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read migrations: %w", err)
+	}
+
+	// Migrasi yang tercatat di database tapi kodenya tidak terdaftar tidak punya
+	// fungsi Down. Melewatinya diam-diam berbahaya: skema milik migrasi itu tetap
+	// hidup sementara migrasi yang lebih tua di bawahnya ikut dibongkar.
+	if len(missing) > 0 {
+		fmt.Println("⚠ Migrasi berikut tercatat di database tapi tidak ada di registry:")
+		for _, m := range missing {
+			fmt.Printf("  - %s (version %d)\n", m.Name, m.Version)
+		}
+		fmt.Println()
+
+		if !c.allowMissing {
+			return fmt.Errorf(
+				"%d dari %d migrasi yang ditargetkan tidak ada di registry sehingga fungsi Down-nya tidak dapat dijalankan; "+
+					"tidak ada yang di-rollback. Pastikan package migrasinya ter-import, atau jalankan ulang dengan -allow-missing untuk melewatinya",
+				len(missing), len(missing)+len(migrationsToRollback))
+		}
+		fmt.Println("-allow-missing aktif: migrasi di atas dilewati.")
 	}
 
 	if len(migrationsToRollback) == 0 {
 		fmt.Println("No migrations to rollback")
 		return nil
 	}
+
+	fmt.Printf("Rolling back %d migration(s)...\n", len(migrationsToRollback))
 
 	// Display migrations that will be rolled back
 	fmt.Println("\nThe following migrations will be rolled back:")
@@ -178,6 +200,9 @@ func (c *MigrateRollbackCommand) Execute(ctx *CommandContext) error {
 	}
 
 	fmt.Printf("\n✓ Successfully rolled back %d migration(s)\n", len(migrationsToRollback))
+	if len(missing) > 0 {
+		fmt.Printf("⚠ %d migrasi dilewati karena tidak ada di registry\n", len(missing))
+	}
 	return nil
 }
 
@@ -339,14 +364,16 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 
 	db := migrationConn(ctx)
 
-	// Get all framework migrations
-	frameworkMigrations := GetFrameworkMigrations()
-	// Add registered migrations
-	frameworkMigrations = append(frameworkMigrations, GetRegisteredMigrations()...)
+	// Gabungan migrasi framework + migrasi terdaftar, terurut berdasarkan Version
+	allMigrations := GetAllMigrations()
 
-	// Get applied migrations from database
-	appliedMap := make(map[int64]time.Time)
-	query := `SELECT version, applied_at FROM migrations ORDER BY version`
+	// Ambil migrasi yang sudah tercatat di database
+	type appliedRecord struct {
+		name      string
+		appliedAt time.Time
+	}
+	appliedMap := make(map[int64]appliedRecord)
+	query := `SELECT version, name, applied_at FROM migrations ORDER BY version`
 	rows, err := db.Query(context.Background(), query)
 	if err != nil {
 		// Table might not exist yet
@@ -355,11 +382,15 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 		defer rows.Close()
 		for rows.Next() {
 			var version int64
+			var name string
 			var appliedAt time.Time
-			if err := rows.Scan(&version, &appliedAt); err != nil {
+			if err := rows.Scan(&version, &name, &appliedAt); err != nil {
 				return err
 			}
-			appliedMap[version] = appliedAt
+			appliedMap[version] = appliedRecord{name: name, appliedAt: appliedAt}
+		}
+		if err := rows.Err(); err != nil {
+			return err
 		}
 	}
 
@@ -381,30 +412,56 @@ func (c *MigrateListCommand) Execute(ctx *CommandContext) error {
 	fmt.Printf("%-*s %-*s %-*s %s\n", versionWidth, "Version", nameWidth, "Name", statusWidth, "Status", "Applied At")
 	fmt.Println(strings.Repeat("-", separatorWidth))
 
-	// Display each migration
-	for _, migration := range frameworkMigrations {
+	truncate := func(name string) string {
+		if len(name) > nameWidth {
+			return name[:nameWidth-3] + "..."
+		}
+		return name
+	}
+
+	// Tampilkan setiap migrasi yang terdaftar
+	appliedCount := 0
+	pendingCount := 0
+	known := make(map[int64]bool, len(allMigrations))
+	for _, migration := range allMigrations {
+		known[migration.Version] = true
+
 		status := "Pending"
 		appliedAt := "-"
 
-		if t, applied := appliedMap[migration.Version]; applied {
+		if rec, applied := appliedMap[migration.Version]; applied {
 			status = "Applied"
-			appliedAt = t.Format("2006-01-02 15:04:05")
+			appliedAt = rec.appliedAt.Format("2006-01-02 15:04:05")
+			appliedCount++
+		} else {
+			pendingCount++
 		}
 
-		// Truncate name if too long
-		name := migration.Name
-		if len(name) > nameWidth {
-			name = name[:nameWidth-3] + "..."
-		}
+		fmt.Printf("%-*d %-*s %-*s %s\n", versionWidth, migration.Version, nameWidth, truncate(migration.Name), statusWidth, status, appliedAt)
+	}
 
-		fmt.Printf("%-*d %-*s %-*s %s\n", versionWidth, migration.Version, nameWidth, name, statusWidth, status, appliedAt)
+	// Migrasi yang tercatat di database tapi kodenya sudah tidak terdaftar.
+	// Ditampilkan terpisah, bukan disembunyikan: inilah yang membuat
+	// `migrate:rollback` menolak berjalan.
+	var orphans []int64
+	for version := range appliedMap {
+		if !known[version] {
+			orphans = append(orphans, version)
+		}
+	}
+	slices.Sort(orphans)
+
+	for _, version := range orphans {
+		rec := appliedMap[version]
+		fmt.Printf("%-*d %-*s %-*s %s\n", versionWidth, version, nameWidth, truncate(rec.name), statusWidth, "Orphan", rec.appliedAt.Format("2006-01-02 15:04:05"))
 	}
 
 	// Summary
-	appliedCount := len(appliedMap)
-	pendingCount := len(frameworkMigrations) - appliedCount
 	fmt.Println()
-	fmt.Printf("Total: %d | Applied: %d | Pending: %d\n", len(frameworkMigrations), appliedCount, pendingCount)
+	fmt.Printf("Total: %d | Applied: %d | Pending: %d\n", len(allMigrations), appliedCount, pendingCount)
+	if len(orphans) > 0 {
+		fmt.Printf("⚠ Orphan: %d (tercatat di database tapi tidak ada di registry)\n", len(orphans))
+	}
 
 	return nil
 }
