@@ -119,6 +119,7 @@ go run main.go migrate [flags]
 
 **Flags:**
 - `-v`: Verbose mode, menampilkan detail setiap step migrasi dan koneksi yang digunakan.
+- `-table`: Tabel pencatat riwayat migrasi, boleh dikualifikasi schema (Default: `migrations`). Contoh: `-table myschema.migrations`. Lihat [Migrasi Multi-Schema](09-migrations.md#migrasi-multi-schema).
 
 ---
 
@@ -133,6 +134,9 @@ go run main.go migrate:rollback [flags]
 
 **Flags:**
 - `-step`: Jumlah batch migrasi yang ingin di-rollback (Default: 1).
+- `-force`: Lewati prompt konfirmasi.
+- `-allow-missing`: Lanjutkan meski ada migrasi yang tercatat di database tetapi kodenya tidak ada di sumber migrasi (migrasi tersebut dilewati). Tanpa flag ini perintahnya menolak berjalan dan tidak menyentuh apa pun.
+- `-table`: Tabel pencatat riwayat migrasi, boleh dikualifikasi schema (Default: `migrations`). Menentukan pula cakupan `-step`: dengan pencatat per schema, `-step 2` berarti dua migrasi terakhir milik modul itu, bukan dua baris terakhir riwayat gabungan.
 
 ---
 
@@ -142,8 +146,11 @@ Menampilkan status semua migrasi (Applied vs Pending). Sangat berguna untuk meng
 
 **Usage:**
 ```bash
-go run main.go migrate:list
+go run main.go migrate:list [flags]
 ```
+
+**Flags:**
+- `-table`: Tabel pencatat riwayat migrasi, boleh dikualifikasi schema (Default: `migrations`).
 
 **Output:**
 ```

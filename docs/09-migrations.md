@@ -10,6 +10,7 @@ Kelola perubahan skema database secara terstruktur, versioned, dan aman mengguna
 - [Struktur Migration](#struktur-migration)
 - [Menjalankan Migration](#menjalankan-migration)
 - [Override Default Tables](#override-default-tables)
+- [Migrasi Multi-Schema](#migrasi-multi-schema)
 
 ---
 
@@ -224,3 +225,63 @@ console.Run(os.Args[1:])
 ```
 
 Jika `DB_MIGRATION_HOST` tidak di-set, semua perintah migrate tetap berjalan normal menggunakan koneksi Write — tidak ada perubahan behavior untuk setup yang sudah ada.
+---
+
+## Migrasi Multi-Schema
+
+Aplikasi yang dipecah menjadi kernel + beberapa modul biasanya memberi tiap modul **schema PostgreSQL-nya sendiri** (`module_a`, `module_b`, …), dengan seluruh SQL dikualifikasi penuh (`module_a.<tabel>`) dan tanpa `search_path`. Tiga hal berikut yang dibutuhkan bentuk itu — ketiganya opsional, dan aplikasi yang tidak memakai schema tidak perlu menyentuhnya sama sekali.
+
+### 1. Tabel pencatat per schema
+
+Tanpa `search_path`, tabel pencatat riwayat migrasi mendarat di schema bawaan koneksi — bukan di schema modul yang sedang dimigrasi. `RunMigrationsIn` menerima nama tabelnya:
+
+```go
+// migrasi sebuah modul, riwayatnya dicatat di myschema.migrations
+err := dim.RunMigrationsIn(db, "myschema.migrations", migrations)
+
+// pasangannya saat rollback
+err = dim.RollbackMigrationIn(db, "myschema.migrations", migration)
+```
+
+`RunMigrations(db, migrations)` adalah pembungkus tipis dari `RunMigrationsIn(db, "migrations", migrations)`, jadi kode lama tidak berubah perilakunya. Nama tabelnya boleh polos (`migrations`) atau berkualifikasi schema (`myschema.migrations`); nama yang bukan identifier SQL sah ditolak sebelum query apa pun dijalankan.
+
+> **Schema-nya harus sudah ada.** dim tidak menjalankan `CREATE SCHEMA` — pembuatan schema adalah urusan aplikasi, karena ia yang tahu kepemilikan dan hak aksesnya.
+
+Ini juga yang membuat isolasi test berbasis prefix schema bekerja: tiap test punya pencatatnya sendiri, aman-paralel, dan dibersihkan sekaligus lewat `DROP SCHEMA … CASCADE`.
+
+```go
+schema := "test_9f2c_myschema" // prefix unik per test
+db.Exec(ctx, "CREATE SCHEMA "+schema)
+dim.RunMigrationsIn(db, schema+".migrations", mymodule.Migrations(schema))
+t.Cleanup(func() { db.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE") })
+```
+
+### 2. Mengganti sumber migrasi
+
+`dim.Register()` dipanggil dari `init()`, sehingga string SQL-nya beku sebelum program tahu ke schema mana ia akan bermigrasi. Aplikasi yang perlu merakit migrasinya saat runtime dapat menyerahkan perakitnya ke `SetMigrationSource`, dan perintah `migrate`, `migrate:list`, serta `migrate:rollback` akan memakainya alih-alih registry global:
+
+```go
+func main() {
+    schema := os.Getenv("APP_SCHEMA") // "myschema", "test_9f2c_myschema", …
+    dim.SetMigrationSource(func() []dim.Migration {
+        return mymodule.Migrations(schema)
+    })
+    // …
+}
+```
+
+Tidak dipanggil = perilaku sekarang, persis: sumbernya tetap `GetAllMigrations()`. Panggil dengan `nil` untuk mengembalikannya ke registry global. Slice yang dikembalikan selalu disalin dan diurutkan berdasarkan `Version` sebelum dipakai, sama seperti `GetAllMigrations()`.
+
+### 3. Flag `--table` pada perintah bawaan
+
+```bash
+go run . migrate            --table myschema.migrations
+go run . migrate:list       --table myschema.migrations
+go run . migrate:rollback   --table myschema.migrations -step 2
+```
+
+Tanpa flag = `migrations`, sama seperti sebelumnya.
+
+Efeknya pada rollback: cakupannya menjadi satu modul. Pada riwayat global, `migrate:rollback -step 3` bisa membatalkan satu migrasi kernel dan dua migrasi modul yang tidak berhubungan — satuannya "tiga terakhir", yang tidak punya makna domain. Dengan pencatat per schema, `-step 2` berarti dua migrasi terakhir **milik modul itu**.
+
+Ini sekaligus melunakkan penolakan `migrate:rollback` terhadap migrasi yatim (lihat `-allow-missing`): mencabut sebuah modul berarti `DROP SCHEMA <schema modul itu> CASCADE`, yang menghapus tabelnya **dan** riwayatnya sekaligus — tidak ada baris yatim yang tersisa untuk mengunci rollback modul lain.

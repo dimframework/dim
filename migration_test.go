@@ -377,3 +377,394 @@ func TestMigrateListNoOrphan(t *testing.T) {
 		t.Errorf("tidak boleh ada orphan.\ngot:\n%s", out)
 	}
 }
+
+// isolateMigrationSource mengembalikan sumber migrasi ke registry global
+// setelah satu test selesai.
+func isolateMigrationSource(t *testing.T) {
+	t.Helper()
+	original := migrationSource
+	t.Cleanup(func() { migrationSource = original })
+}
+
+// tableExists melaporkan apakah sebuah tabel ada di SQLite in-memory.
+func tableExists(t *testing.T, db Database, name string) bool {
+	t.Helper()
+	var count int64
+	row := db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", name)
+	if err := row.Scan(&count); err != nil {
+		t.Fatalf("sqlite_master: %v", err)
+	}
+	return count > 0
+}
+
+// recordedVersions mengembalikan versi yang tercatat di sebuah tabel pencatat.
+func recordedVersions(t *testing.T, db Database, table string) []int64 {
+	t.Helper()
+	rows, err := db.Query(context.Background(), "SELECT version FROM "+table+" ORDER BY version")
+	if err != nil {
+		t.Fatalf("query %s: %v", table, err)
+	}
+	defer rows.Close()
+
+	var versions []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return versions
+}
+
+// newMemoryDB membuka SQLite in-memory yang ditutup saat test selesai.
+func newMemoryDB(t *testing.T) Database {
+	t.Helper()
+	db, err := NewSQLiteDatabase(DatabaseConfig{Database: ":memory:"})
+	if err != nil {
+		t.Fatalf("NewSQLiteDatabase: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// TestResolveMigrationsTable mengunci apa yang boleh disisipkan ke SQL.
+// Nama tabel tidak dapat dikirim sebagai parameter query, sehingga validasinya
+// di sini adalah satu-satunya penjaga.
+func TestResolveMigrationsTable(t *testing.T) {
+	valid := map[string]string{
+		"":                              DefaultMigrationsTable,
+		"  ":                            DefaultMigrationsTable,
+		"migrations":                    "migrations",
+		"myschema.migrations":           "myschema.migrations",
+		"test_9f2c_module_a.migrations": "test_9f2c_module_a.migrations",
+		"_private.t$bl":                 "_private.t$bl",
+		"  myschema.migrations  ":       "myschema.migrations",
+	}
+	for input, want := range valid {
+		got, err := resolveMigrationsTable(input)
+		if err != nil {
+			t.Errorf("resolveMigrationsTable(%q): unexpected error %v", input, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("resolveMigrationsTable(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	invalid := []string{
+		"migrations; DROP TABLE users",
+		"migrations--",
+		"public.myschema.migrations",
+		"1migrations",
+		"mig rations",
+		"\"quoted\"",
+		"myschema.",
+		".migrations",
+		"migrations)",
+	}
+	for _, input := range invalid {
+		if got, err := resolveMigrationsTable(input); err == nil {
+			t.Errorf("resolveMigrationsTable(%q) = %q, want error", input, got)
+		}
+	}
+}
+
+// TestRunMigrationsInCustomTable memastikan tabel pencatat benar-benar pindah:
+// riwayatnya masuk ke tabel yang diminta, dan tabel `migrations` bawaan tidak
+// ikut dibuat.
+func TestRunMigrationsInCustomTable(t *testing.T) {
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	migrations := []Migration{
+		{Version: 100, Name: "first", Up: noop, Down: noop},
+		{Version: 200, Name: "second", Up: noop, Down: noop},
+	}
+
+	if err := RunMigrationsIn(db, "module_b_migrations", migrations); err != nil {
+		t.Fatalf("RunMigrationsIn: %v", err)
+	}
+
+	if got := recordedVersions(t, db, "module_b_migrations"); !slices.Equal(got, []int64{100, 200}) {
+		t.Errorf("versi tercatat: got %v, want [100 200]", got)
+	}
+	if tableExists(t, db, DefaultMigrationsTable) {
+		t.Error("tabel `migrations` bawaan tidak boleh ikut dibuat")
+	}
+}
+
+// TestRunMigrationsInQualifiedTable memastikan nama berkualifikasi benar-benar
+// sampai ke SQL, bukan hanya lolos validasi. SQLite mengenal `main` sebagai
+// kualifikasi database, cukup untuk membuktikan bentuk `x.y` tersisip utuh.
+func TestRunMigrationsInQualifiedTable(t *testing.T) {
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	migrations := []Migration{{Version: 100, Name: "first", Up: noop, Down: noop}}
+
+	if err := RunMigrationsIn(db, "main.module_a_migrations", migrations); err != nil {
+		t.Fatalf("RunMigrationsIn: %v", err)
+	}
+
+	if got := recordedVersions(t, db, "module_a_migrations"); !slices.Equal(got, []int64{100}) {
+		t.Errorf("versi tercatat: got %v, want [100]", got)
+	}
+}
+
+// TestRunMigrationsInRejectsBadTable memastikan nama tabel yang tidak valid
+// ditolak sebelum apa pun dijalankan — bukan diteruskan ke SQL.
+func TestRunMigrationsInRejectsBadTable(t *testing.T) {
+	db := newMemoryDB(t)
+
+	ran := false
+	migrations := []Migration{{
+		Version: 100,
+		Name:    "first",
+		Up:      func(Database) error { ran = true; return nil },
+		Down:    func(Database) error { return nil },
+	}}
+
+	err := RunMigrationsIn(db, "migrations; DROP TABLE users", migrations)
+	if err == nil {
+		t.Fatal("expected error untuk nama tabel yang tidak valid")
+	}
+	if ran {
+		t.Error("tidak boleh ada migrasi yang berjalan saat nama tabelnya ditolak")
+	}
+}
+
+// TestRunMigrationsUsesDefaultTable mengunci kompatibilitas mundur: pembungkus
+// lamanya tetap mencatat di tabel `migrations`.
+func TestRunMigrationsUsesDefaultTable(t *testing.T) {
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	if err := RunMigrations(db, []Migration{{Version: 100, Name: "first", Up: noop, Down: noop}}); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	if got := recordedVersions(t, db, DefaultMigrationsTable); !slices.Equal(got, []int64{100}) {
+		t.Errorf("versi tercatat di `migrations`: got %v, want [100]", got)
+	}
+}
+
+// TestRollbackMigrationInRemovesFromScopedTable memastikan rollback menghapus
+// catatannya dari tabel yang sama dengan yang mencatatnya.
+func TestRollbackMigrationInRemovesFromScopedTable(t *testing.T) {
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	m := Migration{Version: 100, Name: "first", Up: noop, Down: noop}
+
+	if err := RunMigrationsIn(db, "module_b_migrations", []Migration{m}); err != nil {
+		t.Fatalf("RunMigrationsIn: %v", err)
+	}
+	if err := RollbackMigrationIn(db, "module_b_migrations", m); err != nil {
+		t.Fatalf("RollbackMigrationIn: %v", err)
+	}
+
+	if got := recordedVersions(t, db, "module_b_migrations"); len(got) != 0 {
+		t.Errorf("catatan harusnya terhapus, tersisa %v", got)
+	}
+}
+
+// TestSetMigrationSourceUsedByCommands memastikan perintah bawaan membaca
+// sumber yang dipasang, bukan registry global — inti dari kasus aplikasi yang
+// merakit migrasinya saat runtime karena butuh nama schema.
+func TestSetMigrationSourceUsedByCommands(t *testing.T) {
+	isolateRegistry(t)
+	isolateMigrationSource(t)
+	db := newMemoryDB(t)
+
+	// Registry global sengaja diisi hal lain; ia tidak boleh terpakai
+	noop := func(Database) error { return nil }
+	Register(Migration{Version: 900, Name: "dari_registry", Up: noop, Down: noop})
+
+	var upOrder []int64
+	track := func(v int64) func(Database) error {
+		return func(Database) error {
+			upOrder = append(upOrder, v)
+			return nil
+		}
+	}
+
+	SetMigrationSource(func() []Migration {
+		// Sengaja tidak terurut: dim yang mengurutkannya
+		return []Migration{
+			{Version: 200, Name: "dari_sumber_kedua", Up: track(200), Down: noop},
+			{Version: 100, Name: "dari_sumber_pertama", Up: track(100), Down: noop},
+		}
+	})
+
+	if err := (&MigrateCommand{}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	if !slices.Equal(upOrder, []int64{100, 200}) {
+		t.Errorf("urutan migrate salah: got %v, want [100 200] (menaik)", upOrder)
+	}
+	if got := recordedVersions(t, db, DefaultMigrationsTable); !slices.Equal(got, []int64{100, 200}) {
+		t.Errorf("versi tercatat: got %v, want [100 200] — registry global ikut terpakai?", got)
+	}
+}
+
+// TestMigrationSourceUnsetKeepsRegistry memastikan tanpa SetMigrationSource
+// perilakunya persis seperti sebelumnya.
+func TestMigrationSourceUnsetKeepsRegistry(t *testing.T) {
+	isolateRegistry(t)
+	isolateMigrationSource(t)
+
+	noop := func(Database) error { return nil }
+	Register(Migration{Version: 100, Name: "first", Up: noop, Down: noop})
+
+	got := migrationsFromSource()
+	want := GetAllMigrations()
+	if len(got) != len(want) {
+		t.Fatalf("got %d migrasi, want %d", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].Version != want[i].Version {
+			t.Errorf("index %d: got versi %d, want %d", i, got[i].Version, want[i].Version)
+		}
+	}
+
+	// Dipasang lalu dilepas kembali
+	SetMigrationSource(func() []Migration { return nil })
+	if len(migrationsFromSource()) != 0 {
+		t.Error("sumber terpasang tidak terpakai")
+	}
+	SetMigrationSource(nil)
+	if len(migrationsFromSource()) != len(want) {
+		t.Error("SetMigrationSource(nil) tidak mengembalikan ke registry global")
+	}
+}
+
+// TestMigrateCommandTableFlagScopesHistory adalah alasan utama flag -table ada:
+// dua modul dengan pencatatnya masing-masing tidak saling melihat, sehingga
+// `-step` punya makna domain — "dua terakhir milik modul ini", bukan "dua baris
+// terakhir dari riwayat gabungan".
+func TestMigrateCommandTableFlagScopesHistory(t *testing.T) {
+	isolateRegistry(t)
+	isolateMigrationSource(t)
+	db := newMemoryDB(t)
+
+	var downOrder []int64
+	noop := func(Database) error { return nil }
+	track := func(v int64) func(Database) error {
+		return func(Database) error {
+			downOrder = append(downOrder, v)
+			return nil
+		}
+	}
+
+	moduleA := []Migration{
+		{Version: 100, Name: "module_a_first", Up: noop, Down: track(100)},
+		{Version: 200, Name: "module_a_second", Up: noop, Down: track(200)},
+	}
+	moduleB := []Migration{
+		{Version: 300, Name: "module_b_first", Up: noop, Down: track(300)},
+	}
+
+	SetMigrationSource(func() []Migration { return moduleA })
+	if err := (&MigrateCommand{table: "module_a_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate module_a: %v", err)
+	}
+
+	SetMigrationSource(func() []Migration { return moduleB })
+	if err := (&MigrateCommand{table: "module_b_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate module_b: %v", err)
+	}
+
+	if got := recordedVersions(t, db, "module_a_migrations"); !slices.Equal(got, []int64{100, 200}) {
+		t.Errorf("riwayat module_a: got %v, want [100 200]", got)
+	}
+	if got := recordedVersions(t, db, "module_b_migrations"); !slices.Equal(got, []int64{300}) {
+		t.Errorf("riwayat module_b: got %v, want [300]", got)
+	}
+
+	// Rollback satu langkah pada module_a harus membatalkan 200 — migrasi
+	// terakhir miliknya — bukan 300 yang versinya lebih tinggi tapi milik modul
+	// lain.
+	SetMigrationSource(func() []Migration { return moduleA })
+	rollback := &MigrateRollbackCommand{steps: 1, force: true, table: "module_a_migrations"}
+	if err := rollback.Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("rollback module_a: %v", err)
+	}
+
+	if !slices.Equal(downOrder, []int64{200}) {
+		t.Errorf("rollback bocor lintas modul: got %v, want [200]", downOrder)
+	}
+	if got := recordedVersions(t, db, "module_a_migrations"); !slices.Equal(got, []int64{100}) {
+		t.Errorf("riwayat module_a setelah rollback: got %v, want [100]", got)
+	}
+	if got := recordedVersions(t, db, "module_b_migrations"); !slices.Equal(got, []int64{300}) {
+		t.Errorf("riwayat module_b tersentuh rollback module_a: got %v", got)
+	}
+}
+
+// TestRollbackMissingCheckIsScopedToTable memastikan penolakan `-allow-missing`
+// dari v0.11.0 ikut bercakupan: migrasi modul lain yang tidak ada di sumber
+// saat ini tidak lagi mengunci rollback modul ini.
+func TestRollbackMissingCheckIsScopedToTable(t *testing.T) {
+	isolateRegistry(t)
+	isolateMigrationSource(t)
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	moduleA := []Migration{{Version: 100, Name: "module_a_first", Up: noop, Down: noop}}
+	moduleB := []Migration{{Version: 300, Name: "module_b_first", Up: noop, Down: noop}}
+
+	SetMigrationSource(func() []Migration { return moduleA })
+	if err := (&MigrateCommand{table: "module_a_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate module_a: %v", err)
+	}
+	SetMigrationSource(func() []Migration { return moduleB })
+	if err := (&MigrateCommand{table: "module_b_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate module_b: %v", err)
+	}
+
+	// module_b dicabut: sumbernya kini hanya module_a. Riwayat module_b masih
+	// ada, tapi di tabelnya sendiri — sehingga rollback module_a tidak melihatnya.
+	SetMigrationSource(func() []Migration { return moduleA })
+	rollback := &MigrateRollbackCommand{steps: 1, force: true, table: "module_a_migrations"}
+	if err := rollback.Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("rollback module_a seharusnya tidak terhalang riwayat modul lain: %v", err)
+	}
+}
+
+// TestMigrateListTableFlag memastikan `migrate:list` membaca tabel yang diminta.
+func TestMigrateListTableFlag(t *testing.T) {
+	isolateRegistry(t)
+	isolateMigrationSource(t)
+	db := newMemoryDB(t)
+
+	noop := func(Database) error { return nil }
+	moduleB := []Migration{
+		{Version: 300, Name: "module_b_first", Up: noop, Down: noop},
+		{Version: 400, Name: "module_b_second", Up: noop, Down: noop},
+	}
+
+	SetMigrationSource(func() []Migration { return moduleB[:1] })
+	if err := (&MigrateCommand{table: "module_b_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	SetMigrationSource(func() []Migration { return moduleB })
+	out := captureStdout(t, func() {
+		if err := (&MigrateListCommand{table: "module_b_migrations"}).Execute(&CommandContext{DB: db}); err != nil {
+			t.Errorf("migrate:list: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Total: 2 | Applied: 1 | Pending: 1") {
+		t.Errorf("ringkasan salah.\ngot:\n%s", out)
+	}
+	if strings.Contains(out, "Orphan") {
+		t.Errorf("tidak boleh ada orphan.\ngot:\n%s", out)
+	}
+}
