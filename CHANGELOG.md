@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.12.0] - 2026-08-25
+
 ### Added
 - **`RunMigrationsIn(db, table, migrations)`**: Menjalankan migrasi dengan riwayatnya dicatat di tabel bernama `table`, yang boleh dikualifikasi schema (`myschema.migrations`). `RunMigrations` kini menjadi pembungkus tipis yang memanggilnya dengan `"migrations"`, sehingga perilaku lamanya identik. Closes [#22](https://github.com/dimframework/dim/issues/22).
   - Sebelumnya `ensureMigrationsTable` membuat tabel bernama `migrations` **tanpa kualifikasi schema**. Pada aplikasi yang berjalan tanpa `search_path` — misalnya kernel + modul yang tiap modulnya punya schema PostgreSQL sendiri dan seluruh SQL-nya dikualifikasi penuh — tabel pencatat mendarat di schema bawaan koneksi, bukan di schema modul yang sedang dimigrasi.
