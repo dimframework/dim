@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 // Migration represents a single migration
@@ -23,8 +24,14 @@ type MigrationHistory struct {
 	Name    string
 }
 
+// DefaultMigrationsTable adalah nama tabel pencatat riwayat migrasi bawaan.
+// Dipakai oleh RunMigrations dan oleh perintah migrasi yang dijalankan tanpa
+// flag -table.
+const DefaultMigrationsTable = "migrations"
+
 var migrationRegistry []Migration
 var includeFrameworkMigrations = true
+var migrationSource func() []Migration
 
 // Register mendaftarkan migration ke global registry.
 // Fungsi ini biasanya dipanggil di dalam fungsi init() pada file migration.
@@ -58,6 +65,46 @@ func GetRegisteredMigrations() []Migration {
 func GetAllMigrations() []Migration {
 	migrations := GetFrameworkMigrations()
 	migrations = append(migrations, migrationRegistry...)
+	sortMigrations(migrations)
+	return migrations
+}
+
+// SetMigrationSource mengganti sumber migrasi yang dibaca oleh perintah bawaan
+// `migrate`, `migrate:list`, dan `migrate:rollback`.
+//
+// Registry global diisi dari init() lewat Register(), sehingga string SQL-nya
+// beku sebelum program tahu ke schema mana ia akan bermigrasi. Aplikasi yang
+// perlu merakit migrasinya saat runtime — misalnya menyuntikkan nama schema per
+// modul atau prefix schema per test — dapat menyerahkan perakitnya ke sini,
+// dan tetap memakai perkakas migrasi dim alih-alih menulis ulang ketiganya.
+//
+// Tidak dipanggil = perilaku sekarang, persis: sumbernya GetAllMigrations().
+// Panggil dengan nil untuk mengembalikannya ke registry global.
+//
+// Slice yang dikembalikan fn selalu disalin dan diurutkan berdasarkan Version
+// sebelum dipakai, sama seperti GetAllMigrations, sehingga urutan jalannya tidak
+// bergantung pada urutan perakitan.
+//
+// Example:
+//
+//	dim.SetMigrationSource(func() []dim.Migration {
+//	  return mymodule.Migrations(schema)
+//	})
+func SetMigrationSource(fn func() []Migration) {
+	migrationSource = fn
+}
+
+// migrationsFromSource mengembalikan migrasi dari sumber yang dipasang lewat
+// SetMigrationSource, atau GetAllMigrations() bila tidak ada.
+func migrationsFromSource() []Migration {
+	if migrationSource == nil {
+		return GetAllMigrations()
+	}
+
+	// Salin agar pengurutan tidak menyentuh slice milik pemanggil
+	source := migrationSource()
+	migrations := make([]Migration, len(source))
+	copy(migrations, source)
 	sortMigrations(migrations)
 	return migrations
 }
@@ -110,13 +157,48 @@ func GetFrameworkMigrations() []Migration {
 //	  log.Fatal(err)
 //	}
 func RunMigrations(db Database, migrations []Migration) error {
+	return RunMigrationsIn(db, DefaultMigrationsTable, migrations)
+}
+
+// RunMigrationsIn sama dengan RunMigrations, tetapi riwayatnya dicatat di tabel
+// bernama `table` alih-alih `migrations`.
+//
+// Nama tabelnya boleh dikualifikasi schema (`myschema.migrations`), yang diperlukan
+// bila koneksi berjalan tanpa `search_path` yang menunjuk ke schema modulnya —
+// tanpa kualifikasi, tabel pencatat mendarat di schema bawaan koneksi, bukan di
+// schema yang sedang dimigrasi. Berguna pula untuk isolasi test berbasis prefix
+// schema, yang tiap test-nya membutuhkan pencatatnya sendiri.
+//
+// Schema-nya harus sudah ada; dim tidak membuatkannya.
+//
+// Parameters:
+//   - db: Database instance untuk execute migration queries
+//   - table: nama tabel pencatat, boleh `schema.tabel`. Kosong = "migrations"
+//   - migrations: slice dari Migration structs yang berisi Up dan Down functions
+//
+// Returns:
+//   - error: error jika nama tabelnya tidak valid, pembuatan tabel pencatat
+//     gagal, atau ada migration yang error
+//
+// Example:
+//
+//	err := RunMigrationsIn(db, "myschema.migrations", migrations)
+//	if err != nil {
+//	  log.Fatal(err)
+//	}
+func RunMigrationsIn(db Database, table string, migrations []Migration) error {
+	table, err := resolveMigrationsTable(table)
+	if err != nil {
+		return err
+	}
+
 	// Create migrations table if it doesn't exist
-	if err := ensureMigrationsTable(db); err != nil {
+	if err := ensureMigrationsTable(db, table); err != nil {
 		return fmt.Errorf("failed to ensure migrations table: %w", err)
 	}
 
 	// Get applied migrations
-	applied, err := getAppliedMigrations(db)
+	applied, err := getAppliedMigrations(db, table)
 	if err != nil {
 		return fmt.Errorf("failed to get applied migrations: %w", err)
 	}
@@ -135,7 +217,7 @@ func RunMigrations(db Database, migrations []Migration) error {
 		}
 
 		// Record migration
-		if err := recordMigration(db, migration); err != nil {
+		if err := recordMigration(db, table, migration); err != nil {
 			return fmt.Errorf("failed to record migration %d: %w", migration.Version, err)
 		}
 
@@ -162,12 +244,42 @@ func RunMigrations(db Database, migrations []Migration) error {
 //	  log.Fatal(err)
 //	}
 func RollbackMigration(db Database, migration Migration) error {
+	return RollbackMigrationIn(db, DefaultMigrationsTable, migration)
+}
+
+// RollbackMigrationIn sama dengan RollbackMigration, tetapi record-nya dihapus
+// dari tabel pencatat bernama `table` alih-alih `migrations`.
+//
+// Pasangan dari RunMigrationsIn: rollback harus menghapus catatannya dari tabel
+// yang sama dengan yang mencatatnya.
+//
+// Parameters:
+//   - db: Database instance untuk execute rollback queries
+//   - table: nama tabel pencatat, boleh `schema.tabel`. Kosong = "migrations"
+//   - migration: Migration struct yang akan di-rollback
+//
+// Returns:
+//   - error: error jika nama tabelnya tidak valid, Down function gagal, atau
+//     gagal menghapus migration record
+//
+// Example:
+//
+//	err := RollbackMigrationIn(db, "myschema.migrations", migration)
+//	if err != nil {
+//	  log.Fatal(err)
+//	}
+func RollbackMigrationIn(db Database, table string, migration Migration) error {
+	table, err := resolveMigrationsTable(table)
+	if err != nil {
+		return err
+	}
+
 	if err := migration.Down(db); err != nil {
 		return fmt.Errorf("rollback failed for migration %d: %w", migration.Version, err)
 	}
 
 	// Remove migration record
-	if err := removeMigration(db, migration); err != nil {
+	if err := removeMigration(db, table, migration); err != nil {
 		return fmt.Errorf("failed to remove migration record: %w", err)
 	}
 
@@ -175,32 +287,65 @@ func RollbackMigration(db Database, migration Migration) error {
 	return nil
 }
 
+// migrationsTableIdentifier mencocokkan satu identifier SQL tak-terkutip.
+var migrationsTableIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
+
+// resolveMigrationsTable memvalidasi nama tabel pencatat dan mengembalikan
+// bentuk yang aman disisipkan ke SQL. Nama tabel tidak dapat dikirim sebagai
+// parameter query, sehingga ia harus disisipkan sebagai teks — dan karena itu
+// wajib divalidasi di sini, bukan dipercaya.
+//
+// Yang diterima: satu identifier (`migrations`) atau identifier berkualifikasi
+// schema (`myschema.migrations`), keduanya tak-terkutip. String kosong berarti
+// DefaultMigrationsTable.
+func resolveMigrationsTable(table string) (string, error) {
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return DefaultMigrationsTable, nil
+	}
+
+	parts := strings.Split(table, ".")
+	if len(parts) > 2 {
+		return "", fmt.Errorf("invalid migrations table %q: expected \"table\" or \"schema.table\"", table)
+	}
+
+	for _, part := range parts {
+		if !migrationsTableIdentifier.MatchString(part) {
+			return "", fmt.Errorf(
+				"invalid migrations table %q: %q is not a valid unquoted SQL identifier",
+				table, part)
+		}
+	}
+
+	return table, nil
+}
+
 // ensureMigrationsTable creates the migrations history table
-func ensureMigrationsTable(db Database) error {
+func ensureMigrationsTable(db Database, table string) error {
 	var query string
 	if db.DriverName() == "sqlite" {
-		query = `
-			CREATE TABLE IF NOT EXISTS migrations (
+		query = fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s (
 				version INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
 				applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			)
-		`
+		`, table)
 	} else {
-		query = `
-			CREATE TABLE IF NOT EXISTS migrations (
+		query = fmt.Sprintf(`
+			CREATE TABLE IF NOT EXISTS %s (
 				version BIGINT PRIMARY KEY,
 				name VARCHAR(255) NOT NULL,
 				applied_at TIMESTAMP DEFAULT NOW()
 			)
-		`
+		`, table)
 	}
 	return db.Exec(context.Background(), query)
 }
 
 // getAppliedMigrations retrieves all applied migrations
-func getAppliedMigrations(db Database) (map[int64]MigrationHistory, error) {
-	rows, err := db.Query(context.Background(), "SELECT version, name FROM migrations ORDER BY version")
+func getAppliedMigrations(db Database, table string) (map[int64]MigrationHistory, error) {
+	rows, err := db.Query(context.Background(), fmt.Sprintf("SELECT version, name FROM %s ORDER BY version", table))
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +370,8 @@ func getAppliedMigrations(db Database) (map[int64]MigrationHistory, error) {
 }
 
 // recordMigration records a migration as applied
-func recordMigration(db Database, migration Migration) error {
-	query := "INSERT INTO migrations (version, name) VALUES ($1, $2)"
+func recordMigration(db Database, table string, migration Migration) error {
+	query := fmt.Sprintf("INSERT INTO %s (version, name) VALUES ($1, $2)", table)
 	if db.DriverName() == "sqlite" {
 		query = rebind(query)
 	}
@@ -234,8 +379,8 @@ func recordMigration(db Database, migration Migration) error {
 }
 
 // removeMigration removes a migration record
-func removeMigration(db Database, migration Migration) error {
-	query := "DELETE FROM migrations WHERE version = $1"
+func removeMigration(db Database, table string, migration Migration) error {
+	query := fmt.Sprintf("DELETE FROM %s WHERE version = $1", table)
 	if db.DriverName() == "sqlite" {
 		query = rebind(query)
 	}

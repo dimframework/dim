@@ -217,8 +217,12 @@ Membuat validator baru.
 - `GetUserMigrations() []Migration`
 - `GetTokenMigrations() []Migration`
 - `GetRateLimitMigrations() []Migration`
-- `RunMigrations(db, migrations)`: Menjalankan migrasi.
+- `RunMigrations(db, migrations)`: Menjalankan migrasi, mencatat riwayatnya di tabel `migrations`.
+- `RunMigrationsIn(db, table, migrations)`: Sama, tetapi riwayatnya dicatat di `table` — boleh dikualifikasi schema (`myschema.migrations`). String kosong = `migrations`.
 - `RollbackMigration(db, migration)`: Membatalkan migrasi.
+- `RollbackMigrationIn(db, table, migration)`: Sama, tetapi record-nya dihapus dari `table`.
+- `SetMigrationSource(fn func() []Migration)`: Mengganti sumber migrasi yang dibaca `migrate`, `migrate:list`, dan `migrate:rollback`. Tidak dipanggil = registry global (`GetAllMigrations()`); `nil` mengembalikannya.
+- `DefaultMigrationsTable`: Konstanta nama tabel pencatat bawaan (`"migrations"`).
 
 ---
 

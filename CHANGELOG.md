@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`RunMigrationsIn(db, table, migrations)`**: Menjalankan migrasi dengan riwayatnya dicatat di tabel bernama `table`, yang boleh dikualifikasi schema (`myschema.migrations`). `RunMigrations` kini menjadi pembungkus tipis yang memanggilnya dengan `"migrations"`, sehingga perilaku lamanya identik. Closes [#22](https://github.com/dimframework/dim/issues/22).
+  - Sebelumnya `ensureMigrationsTable` membuat tabel bernama `migrations` **tanpa kualifikasi schema**. Pada aplikasi yang berjalan tanpa `search_path` — misalnya kernel + modul yang tiap modulnya punya schema PostgreSQL sendiri dan seluruh SQL-nya dikualifikasi penuh — tabel pencatat mendarat di schema bawaan koneksi, bukan di schema modul yang sedang dimigrasi.
+  - Ini pula yang membuat isolasi test berbasis prefix schema bekerja: tiap test butuh pencatatnya sendiri, kalau tidak dua test paralel berbagi satu riwayat.
+  - Nama tabelnya divalidasi sebagai identifier SQL tak-terkutip (`tabel` atau `schema.tabel`) sebelum disisipkan ke query. Nama yang tidak sah ditolak sebelum apa pun dijalankan — nama tabel tidak dapat dikirim sebagai parameter query, sehingga validasi ini satu-satunya penjaganya.
+  - Schema-nya harus sudah ada; dim tidak menjalankan `CREATE SCHEMA`.
+- **`RollbackMigrationIn(db, table, migration)`**: Pasangan `RunMigrationsIn` — menghapus record dari tabel pencatat yang sama dengan yang mencatatnya. `RollbackMigration` menjadi pembungkusnya dengan `"migrations"`.
+- **`SetMigrationSource(fn func() []Migration)`**: Mengganti sumber migrasi yang dibaca `migrate`, `migrate:list`, dan `migrate:rollback`.
+  - `Register()` dipanggil dari `init()`, sehingga string SQL-nya beku sebelum program tahu ke schema mana ia akan bermigrasi. Aplikasi yang perlu merakit migrasinya saat runtime sebelumnya membuat ketiga perintah itu melihat registry kosong, dan terpaksa menulis ulang ketiganya.
+  - Tidak dipanggil = perilaku sekarang, persis: sumbernya `GetAllMigrations()`. Panggil dengan `nil` untuk mengembalikannya ke registry global.
+  - Slice yang dikembalikan `fn` selalu disalin dan diurutkan berdasarkan `Version` sebelum dipakai, sama seperti `GetAllMigrations()` — jaminan urutan dari [#20](https://github.com/dimframework/dim/issues/20) berlaku sama bagi sumber pengganti.
+- **Flag `-table` pada `migrate`, `migrate:list`, dan `migrate:rollback`**: Menentukan tabel pencatat yang dipakai perintahnya. Tanpa flag = `migrations`, sama seperti sebelumnya.
+  - Pada `migrate:rollback` flag ini sekaligus memberi cakupan. Atas satu riwayat global, `-step 3` dapat membatalkan satu migrasi kernel dan dua migrasi modul yang tidak berhubungan — satuannya "tiga terakhir", yang tidak punya makna domain. Dengan pencatat per schema, `-step 2` berarti dua migrasi terakhir **milik modul itu**.
+  - Ikut melunakkan penolakan migrasi yatim yang masuk di v0.11.0: mencabut sebuah modul kini berarti `DROP SCHEMA <schema modul itu> CASCADE`, yang menghapus tabelnya dan riwayatnya sekaligus. Tidak ada baris yatim yang tersisa untuk mengunci rollback modul lain — perilaku `-allow-missing` sendiri tidak berubah.
+  - `migrate:list` kini mengimplementasikan `FlaggedCommand`, sehingga `migrate:list -h` menampilkan daftar flag alih-alih help ringkas.
+
+Seluruh tambahan di atas bersifat aditif. `Migration`, `Register`, `GetRegisteredMigrations`, `GetAllMigrations`, `RunMigrations`, dan `RollbackMigration` tidak berubah tanda tangan maupun perilakunya; aplikasi yang tidak memakai schema tidak melihat perbedaan apa pun.
+
 ---
 
 ## [v0.11.0] - 2026-08-22

@@ -396,3 +396,59 @@ func TestMakeMigrationCommand_Execute_GeneratesValidFile(t *testing.T) {
 		t.Error("Generated file contains deprecated pgxpool import")
 	}
 }
+
+// ============================================================================
+// -table flag
+// ============================================================================
+
+// TestMigrationCommands_TableFlag memastikan ketiga perintah punya flag -table
+// dengan default "migrations", sehingga menjalankannya tanpa flag identik
+// dengan perilaku sebelumnya.
+func TestMigrationCommands_TableFlag(t *testing.T) {
+	commands := map[string]FlaggedCommand{
+		"migrate":          &MigrateCommand{},
+		"migrate:list":     &MigrateListCommand{},
+		"migrate:rollback": &MigrateRollbackCommand{},
+	}
+
+	for name, cmd := range commands {
+		fs := flag.NewFlagSet(name, flag.ContinueOnError)
+		cmd.DefineFlags(fs)
+
+		f := fs.Lookup("table")
+		if f == nil {
+			t.Errorf("%s: flag -table tidak didefinisikan", name)
+			continue
+		}
+		if f.DefValue != DefaultMigrationsTable {
+			t.Errorf("%s: default -table = %q, want %q", name, f.DefValue, DefaultMigrationsTable)
+		}
+
+		if err := fs.Parse([]string{"--table", "myschema.migrations"}); err != nil {
+			t.Errorf("%s: parse --table: %v", name, err)
+			continue
+		}
+		if got := f.Value.String(); got != "myschema.migrations" {
+			t.Errorf("%s: -table = %q, want %q", name, got, "myschema.migrations")
+		}
+	}
+}
+
+// TestMigrationCommands_RejectInvalidTable memastikan nama tabel yang tidak
+// valid ditolak oleh perintahnya, bukan diteruskan ke database.
+func TestMigrationCommands_RejectInvalidTable(t *testing.T) {
+	db := newMemoryDB(t)
+	const bad = "migrations; DROP TABLE users"
+
+	commands := map[string]Command{
+		"migrate":          &MigrateCommand{table: bad},
+		"migrate:list":     &MigrateListCommand{table: bad},
+		"migrate:rollback": &MigrateRollbackCommand{table: bad, steps: 1, force: true},
+	}
+
+	for name, cmd := range commands {
+		if err := cmd.Execute(&CommandContext{DB: db}); err == nil {
+			t.Errorf("%s: expected error untuk -table %q", name, bad)
+		}
+	}
+}
