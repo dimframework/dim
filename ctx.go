@@ -141,3 +141,17 @@ func (c *Ctx) ServiceUnavailable(message string) error {
 func (c *Ctx) AppError(appErr *AppError) error {
 	return JsonAppError(c.w, appErr)
 }
+
+// SSE membuka event-stream Server-Sent Events di response Ctx.
+// Lihat dim.SSE untuk detail perilakunya (header, write deadline, heartbeat,
+// deteksi putus koneksi) — termasuk kewajiban memanggil defer stream.Close()
+// sebelum handler return.
+func (c *Ctx) SSE(opts ...SSEOption) (*SSEWriter, error) {
+	return SSE(c.w, c.r, opts...)
+}
+
+// LastEventID mengambil header Last-Event-ID dari request.
+// Lihat dim.LastEventID untuk detail.
+func (c *Ctx) LastEventID() string {
+	return LastEventID(c.r)
+}

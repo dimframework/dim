@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`SSE(w, r, opts...)` / `Ctx.SSE(opts...)`**: Helper Server-Sent Events yang mengurus header (`Content-Type`, `Cache-Control`, `Connection`, `X-Accel-Buffering`), write deadline, heartbeat, dan deteksi klien pergi, sehingga handler cukup memanggil `Send` untuk tiap event. Closes [#24](https://github.com/dimframework/dim/issues/24).
+  - **`WriteTimeout` mematikan SSE tanpa tanda**: `WriteTimeout` server (default 10 detik, atau `SERVER_WRITE_TIMEOUT` bila disetel — bawaannya 30 detik) adalah tenggat mutlak atas seluruh response, bukan per-tulisan, sehingga tiap SSE mati begitu tenggat itu lewat, berapa pun event yang sudah terkirim. Karena `EventSource` menyambung ulang sendiri, dari sisi pengguna stream-nya "jalan", hanya saja putus-sambung tiap 10/30 detik selamanya — dan tanpa `Last-Event-ID` yang bekerja, tiap sambung ulang itu kehilangan event yang lewat di sela-selanya. `SSE` menonaktifkan tenggat ini per-response lewat `http.ResponseController.SetWriteDeadline(zero time)`, terjangkau karena `wrapResponseWriter` mempertahankan `Unwrap()` (hasil #16).
+  - **`LastEventID(r)` / `Ctx.LastEventID()`**: Membaca header `Last-Event-ID` yang dikirim otomatis oleh peramban saat menyambung ulang. dim tidak menyimpan atau mengirim ulang riwayat event dengan sendirinya — hanya handler yang tahu di mana riwayat itu tersimpan, jadi nilainya diserahkan sebagai string biasa.
+  - **`SSEWriter.Close()` wajib dipanggil** (lewat `defer`, segera setelah `SSE` berhasil) sebelum handler return, supaya goroutine heartbeat berhenti dulu — net/http mulai menutup response tepat setelah handler kembali, dan tanpa menunggu heartbeat berhenti keduanya bisa menulis ke response secara bersamaan.
+  - Framing (`id:`, `event:`, `data:`, pemecahan baris untuk data multi-baris) dan heartbeat (`WithHeartbeatInterval`, bawaan 15 detik) diurus otomatis; `SSEWriter.Done()` mengekspos selesainya `r.Context()` untuk menghentikan goroutine pengirim handler saat klien pergi.
+
 ---
 
 ## [v0.12.0] - 2026-08-25
