@@ -24,8 +24,14 @@ type Config struct {
 
 // ServerConfig holds server configuration
 type ServerConfig struct {
-	Port            string
-	ReadTimeout     time.Duration
+	Port        string
+	ReadTimeout time.Duration
+	// WriteTimeout adalah tenggat MUTLAK atas seluruh response, bukan
+	// per-tulisan (default 10 detik, atau SERVER_WRITE_TIMEOUT bila disetel —
+	// bawaannya 30 detik). Pada route SSE/streaming ini memutus koneksi begitu
+	// tenggat lewat, berapa pun data yang sudah terkirim. Gunakan dim.SSE atau
+	// dim.Ctx.SSE untuk route semacam itu — keduanya menonaktifkan tenggat ini
+	// per-response lewat http.ResponseController.SetWriteDeadline.
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
