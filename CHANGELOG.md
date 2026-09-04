@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.13.0] - 2026-09-05
+
 ### Added
 - **`SSE(w, r, opts...)` / `Ctx.SSE(opts...)`**: Helper Server-Sent Events yang mengurus header (`Content-Type`, `Cache-Control`, `Connection`, `X-Accel-Buffering`), write deadline, heartbeat, dan deteksi klien pergi, sehingga handler cukup memanggil `Send` untuk tiap event. Closes [#24](https://github.com/dimframework/dim/issues/24).
   - **`WriteTimeout` mematikan SSE tanpa tanda**: `WriteTimeout` server (default 10 detik, atau `SERVER_WRITE_TIMEOUT` bila disetel — bawaannya 30 detik) adalah tenggat mutlak atas seluruh response, bukan per-tulisan, sehingga tiap SSE mati begitu tenggat itu lewat, berapa pun event yang sudah terkirim. Karena `EventSource` menyambung ulang sendiri, dari sisi pengguna stream-nya "jalan", hanya saja putus-sambung tiap 10/30 detik selamanya — dan tanpa `Last-Event-ID` yang bekerja, tiap sambung ulang itu kehilangan event yang lewat di sela-selanya. `SSE` menonaktifkan tenggat ini per-response lewat `http.ResponseController.SetWriteDeadline(zero time)`, terjangkau karena `wrapResponseWriter` mempertahankan `Unwrap()` (hasil #16).
