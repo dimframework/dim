@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -117,6 +118,26 @@ type RateLimitConfig struct {
 	PerIP       int
 	PerUser     int
 	ResetPeriod time.Duration
+
+	// Name memisahkan ember limiter ini dari limiter lain yang memakai store yang sama.
+	// Kuncinya menjadi "ip:<name>:<alamat>" dan "user:<name>:<id>".
+	//
+	// Tanpa Name, semua limiter berbagi "ip:<alamat>" — dan yang menolak adalah ambang
+	// limiter yang kebetulan sedang diperiksa. Dua rute dengan ambang berbeda (login 5,
+	// donasi 100) di atas satu store berarti 100 donasi mengunci login. Isi Name pada
+	// setiap limiter per rute; biarkan kosong hanya untuk satu limiter global.
+	Name string
+
+	// KeyFunc, bila diisi, menggantikan ember IP dan user dengan satu ember berkunci
+	// hasil fungsinya, dibatasi PerKey. Dipakai untuk ember per akun, per tenant, atau
+	// per sasaran (misal IP + email) yang tidak dapat diturunkan dari IP dan user saja.
+	//
+	// String kosong dijawab 500: kuncinya belum tersedia, biasanya karena middleware
+	// ini dipasang sebelum middleware yang menyediakannya.
+	KeyFunc func(r *http.Request) string
+
+	// PerKey adalah batas per window untuk ember KeyFunc. Diabaikan tanpa KeyFunc.
+	PerKey int
 }
 
 // ClientIPConfig mengatur cara framework menentukan IP address klien.

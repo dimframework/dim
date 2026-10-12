@@ -25,6 +25,18 @@ type RateLimitStore interface {
 	Close() error
 }
 
+// RetryAfterRateLimitStore adalah RateLimitStore yang tahu berapa lama sebuah kunci
+// masih tertutup. Middleware RateLimit memakainya untuk mengisi header Retry-After
+// dengan sisa waktu yang sebenarnya; store yang tidak mengimplementasikannya membuat
+// Retry-After selalu sebesar window penuh.
+type RetryAfterRateLimitStore interface {
+	RateLimitStore
+
+	// AllowWithRetryAfter sama dengan Allow, ditambah durasi tunggu yang disarankan
+	// bila ditolak. Saat diizinkan, retryAfter adalah 0.
+	AllowWithRetryAfter(ctx context.Context, key string, limit int, window time.Duration) (allowed bool, retryAfter time.Duration, err error)
+}
+
 // --- InMemory Implementation ---
 
 // InMemoryRateLimitStore mengimplementasikan RateLimitStore menggunakan goreus/cache.
@@ -116,10 +128,18 @@ func (s *DatabaseRateLimitStore) InitSchema(ctx context.Context) error {
 
 // Allow mengecek dan menaikkan limit menggunakan Atomic UPSERT.
 func (s *DatabaseRateLimitStore) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
+	allowed, _, err := s.AllowWithRetryAfter(ctx, key, limit, window)
+	return allowed, err
+}
+
+// AllowWithRetryAfter mengecek dan menaikkan limit, lalu mengembalikan sisa window
+// bila ditolak — fixed window berarti kunci tertutup sampai expires_at lewat.
+func (s *DatabaseRateLimitStore) AllowWithRetryAfter(ctx context.Context, key string, limit int, window time.Duration) (bool, time.Duration, error) {
 	now := time.Now().UTC().Truncate(time.Second)
 	expiresAt := now.Add(window)
 
-	// Atomic UPSERT (Insert or Update) dengan logika sliding window.
+	// Atomic UPSERT (Insert or Update) dengan logika fixed window yang berjangkar
+	// pada request pertama di window itu.
 	// Jika record ada tapi expired (expires_at < now), reset count ke 1 dan update expires_at.
 	// Jika record ada dan valid, increment count.
 	// Jika record baru, insert dengan count 1.
@@ -141,18 +161,22 @@ func (s *DatabaseRateLimitStore) Allow(ctx context.Context, key string, limit in
 			WHEN rate_limits.expires_at < $4 THEN $5
 			ELSE rate_limits.expires_at
 		END
-		RETURNING count
+		RETURNING count, expires_at
 	`
 
 	var count int
+	var closedUntil time.Time
 	// Urutan wajib sesuai $1..$5: key, expiresAt, now, now, expiresAt.
 	query = s.db.Rebind(query)
-	err := s.db.QueryRow(ctx, query, key, expiresAt, now, now, expiresAt).Scan(&count)
+	err := s.db.QueryRow(ctx, query, key, expiresAt, now, now, expiresAt).Scan(&count, &closedUntil)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 
-	return count <= limit, nil
+	if count <= limit {
+		return true, 0, nil
+	}
+	return false, closedUntil.Sub(now), nil
 }
 
 // Close menutup koneksi (no-op untuk implementasi ini karena DB dikelola di luar).
