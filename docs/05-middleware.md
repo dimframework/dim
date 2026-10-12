@@ -353,10 +353,22 @@ Dim mendukung penyimpanan counter rate limit di beberapa backend:
     *   **Cons**: Data hilang saat restart, limit tidak terbagi antar instance (jika horizontal scaling).
     *   **Use Case**: Single server deployment.
 
-2.  **PostgreSQL**
+2.  **Database — fixed window** (`NewDatabaseRateLimitStore`)
     *   **Pros**: Persistent, mendukung multi-instance/cluster (distributed rate limiting).
-    *   **Cons**: Sedikit overhead network database.
-    *   **Tech**: Menggunakan `UNLOGGED` table untuk performa maksimal.
+    *   **Cons**: Sedikit overhead network database. Kunci yang melewati ambang **tertutup sampai window habis** — bisa 15 menit penuh — dan request yang ditolak tetap menambah penghitung.
+    *   **Tech**: Menggunakan `UNLOGGED` table untuk performa maksimal; window berjangkar pada request pertama.
+
+3.  **Database — GCRA / token bucket** (`NewGCRARateLimitStore`)
+    *   **Pros**: Tabel yang sama dengan fixed window, tanpa migrasi tambahan. Kunci yang ditolak **pulih per laju** (`window/limit`), bukan per window: untuk 100 per 15 menit, satu request pulih tiap 9 detik. Request yang ditolak tidak menulis apa pun, jadi retry selama penolakan tidak memperpanjangnya. Tidak ada lonjakan 2× di batas window. `Retry-After` menyatakan tunggu yang sebenarnya.
+    *   **Cons**: Semantik ambangnya berbeda — `PerIP: 100, ResetPeriod: 15m` berarti *burst 100, lalu 1 tiap 9 detik*, bukan *100 kapan pun dalam 15 menit*. Jangan bergantian memakai kedua store atas kunci yang sama: keduanya membaca `expires_at` dengan makna berbeda.
+    *   **Tech**: `expires_at` menyimpan *theoretical arrival time* (TAT); `count` tidak dipakai. PostgreSQL satu UPSERT dengan `WHERE` pada `DO UPDATE`; SQLite satu transaksi dengan keputusan dihitung di Go.
+
+    ```go
+    store := dim.NewGCRARateLimitStore(db)
+    router.Post("/donate", donate, dim.RateLimit(dim.RateLimitConfig{
+        Enabled: true, Name: "donate", PerIP: 100, ResetPeriod: 15 * time.Minute,
+    }, store))
+    ```
 
 ### Penggunaan
 
