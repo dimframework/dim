@@ -94,3 +94,66 @@ func TestDatabaseRateLimitStore_SQLiteAcrossSeconds(t *testing.T) {
 		}
 	}
 }
+
+// Retry-After dari fixed window adalah sisa waktu sampai expires_at, bukan window
+// penuh: kunci yang ditolak pada menit ke-14 dari window 15 menit tertutup satu menit
+// lagi, bukan lima belas.
+func TestDatabaseRateLimitStore_SQLiteRetryAfterIsTheRemainingWindow(t *testing.T) {
+	db, err := NewSQLiteDatabase(DatabaseConfig{Database: ":memory:"})
+	if err != nil {
+		t.Fatalf("NewSQLiteDatabase: %v", err)
+	}
+	defer db.Close()
+
+	store := NewDatabaseRateLimitStore(db)
+	ctx := context.Background()
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	assertRetryAfterIsRemainingWindow(t, ctx, store)
+}
+
+func TestDatabaseRateLimitStore_PostgresRetryAfterIsTheRemainingWindow(t *testing.T) {
+	db := newTestPostgresDB(t)
+	store := NewDatabaseRateLimitStore(db)
+	ctx := context.Background()
+	if err := store.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := db.Exec(ctx, "DELETE FROM rate_limits WHERE key = $1", "retry-after"); err != nil {
+		t.Fatalf("bersihkan sisa data: %v", err)
+	}
+
+	assertRetryAfterIsRemainingWindow(t, ctx, store)
+}
+
+func assertRetryAfterIsRemainingWindow(t *testing.T, ctx context.Context, store *DatabaseRateLimitStore) {
+	t.Helper()
+	const key = "retry-after"
+	window := time.Hour
+
+	allowed, retryAfter, err := store.AllowWithRetryAfter(ctx, key, 1, window)
+	if err != nil {
+		t.Fatalf("Allow 1: %v", err)
+	}
+	if !allowed || retryAfter != 0 {
+		t.Fatalf("request pertama: allowed=%v retryAfter=%v, harus diizinkan dengan retryAfter 0", allowed, retryAfter)
+	}
+
+	time.Sleep(1100 * time.Millisecond) // lewati batas detik supaya sisa window terlihat berkurang
+
+	allowed, retryAfter, err = store.AllowWithRetryAfter(ctx, key, 1, window)
+	if err != nil {
+		t.Fatalf("Allow 2: %v", err)
+	}
+	if allowed {
+		t.Fatal("request kedua seharusnya ditolak (limit 1)")
+	}
+	if retryAfter <= 0 || retryAfter >= window {
+		t.Errorf("retryAfter = %v, harus di antara 0 dan window %v: sisa waktu, bukan window penuh", retryAfter, window)
+	}
+	if retryAfter > window-time.Second {
+		t.Errorf("retryAfter = %v tidak berkurang padahal sudah lewat satu detik sejak window dibuka", retryAfter)
+	}
+}

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`RateLimitConfig.Name`**: Memisahkan ember satu limiter dari limiter lain yang memakai store yang sama. Kuncinya menjadi `ip:<name>:<alamat>` dan `user:<name>:<id>`.
+  - Sebelumnya setiap `RateLimit` membentuk kunci `ip:<alamat>` tanpa rute, sehingga semua limiter di atas satu store berbagi satu penghitung per alamat, dan yang menolak adalah ambang limiter yang kebetulan sedang diperiksa. Dua rute berambang berbeda (login 5, donasi 100) berarti 100 donasi dari satu kantor atau satu IP CGNAT mengunci login rekan sekantor — dan refresh sesi (ambang 60) ikut menghabiskan jatah login (ambang 5) di rute yang sama sekali berbeda.
+  - Tanpa `Name`, bentuk kuncinya tidak berubah: aplikasi yang memasang satu limiter global lewat `router.Use` berperilaku persis seperti sebelumnya.
+- **`RateLimitConfig.KeyFunc` + `PerKey`**: Ember berkunci hasil fungsi pemanggil (per akun, per tenant, per gabungan IP + email), menggantikan ember IP dan user. Kunci kosong dijawab 500, bukan diteruskan — limiter yang dipasang sebelum penyedia kuncinya tidak boleh menjadi tidak berefek tanpa suara.
+- **`RetryAfterRateLimitStore`**: Antarmuka opsional di atas `RateLimitStore` yang mengembalikan sisa waktu ember. Middleware memakainya untuk header `Retry-After`; `DatabaseRateLimitStore` mengimplementasikannya. Store yang tidak mengimplementasikannya tetap bekerja, dengan `Retry-After` sebesar `ResetPeriod`.
+- **`RateLimiter.CheckKeyLimit(ctx, key, limit)`**, **`IPKey`**, **`UserKey`**: Pemeriksaan satu kunci terhadap satu limit beserta durasi tunggunya; `CheckIPLimit` dan `CheckUserLimit` menjadi pembungkusnya.
+
+### Fixed
+- **`Retry-After` tidak lagi selalu sebesar window penuh**: Kunci yang ditolak pada menit ke-14 dari window 15 menit kini diberi tahu 60 detik, bukan 900. Nilainya dibulatkan ke atas ke detik, minimal 1.
+- **Penolakan rate limit dicatat**: Setiap 429 ditulis lewat `slog.Default()` pada level Warn dengan `name`, `scope`, `path`, dan `retry_after_seconds`. Sebelumnya hanya kegagalan store yang dicatat, sehingga ambang yang terlalu ketat di produksi tidak terlihat dari mana pun.
+- **Komentar `DatabaseRateLimitStore.Allow` menyebut "sliding window"**, padahal algoritmanya fixed window yang berjangkar pada request pertama. Komentarnya diperbaiki; algoritmanya tidak diubah di rilis ini.
+
 ---
 
 ## [v0.13.0] - 2026-09-05

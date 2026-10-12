@@ -284,11 +284,65 @@ di belakang load balancer seluruh pengguna akan berbagi satu ember rate limit.
 ```go
 config := dim.RateLimitConfig{
     Enabled:     true,
+    Name:        "api",         // Nama ember; lihat "Ember bernama" di bawah
     PerIP:       100,           // Maks 100 request per IP
     PerUser:     200,           // Maks 200 request per user (jika login)
     ResetPeriod: time.Hour,     // Periode reset counter
 }
 ```
+
+### Ember bernama (`Name`)
+
+Kunci ember dibentuk dari `Name`: `ip:<name>:<alamat>` dan `user:<name>:<id>`. Dua
+`RateLimit` dengan `Name` berbeda tidak pernah berbagi ember meski memakai store yang
+sama. **Isi `Name` pada setiap limiter per rute.**
+
+Tanpa `Name`, kuncinya `ip:<alamat>` dan `user:<id>` — semua limiter di atas satu store
+berbagi satu ember per alamat, dan yang menolak adalah ambang limiter yang kebetulan
+sedang diperiksa. Dua rute berambang berbeda (login 5, donasi 100) berarti 100 donasi
+dari satu kantor mengunci login rekan sekantor. Bentuk tanpa `Name` dipertahankan hanya
+untuk aplikasi yang memasang **satu** limiter global lewat `router.Use`.
+
+```go
+store := dim.NewDatabaseRateLimitStore(db)
+
+router.Post("/login", login, dim.RateLimit(dim.RateLimitConfig{
+    Enabled: true, Name: "login", PerIP: 5, ResetPeriod: 15 * time.Minute,
+}, store))
+router.Post("/donate", donate, dim.RateLimit(dim.RateLimitConfig{
+    Enabled: true, Name: "donate", PerIP: 100, ResetPeriod: 15 * time.Minute,
+}, store))
+```
+
+### Ember berkunci bebas (`KeyFunc` + `PerKey`)
+
+Bila `KeyFunc` diisi, hanya ember berkunci hasil fungsinya yang diperiksa, dengan batas
+`PerKey`; `PerIP` dan `PerUser` diabaikan. Dipakai untuk ember per akun, per tenant, atau
+per sasaran (misal gabungan IP + email untuk login) yang tidak dapat diturunkan dari IP
+dan user saja.
+
+`KeyFunc` yang mengembalikan string kosong dijawab **500**, bukan diteruskan: kuncinya
+belum tersedia, biasanya karena limiter dipasang sebelum middleware yang menyediakannya.
+Meneruskannya berarti limiter tidak berefek tanpa suara.
+
+```go
+// Dipasang SESUDAH requireAccount, yang menaruh akun di context.
+router.Post("/profile", updateProfile, requireAccount, dim.RateLimit(dim.RateLimitConfig{
+    Enabled: true, Name: "profile", PerKey: 300, ResetPeriod: 15 * time.Minute,
+    KeyFunc: func(r *http.Request) string { return "account:" + accountIDFrom(r) },
+}, store))
+```
+
+### Penolakan: `Retry-After` dan log
+
+Request yang ditolak dijawab `429` dengan `Retry-After` dalam detik, dibulatkan ke atas,
+minimal 1. Nilainya diambil dari **sisa waktu ember** bila store mengimplementasikan
+`RetryAfterRateLimitStore` (`DatabaseRateLimitStore` sudah); store lain membuat
+`Retry-After` sebesar `ResetPeriod` penuh — batas atas yang aman, bukan sisa waktu.
+
+Setiap penolakan dicatat lewat `slog.Default()` pada level **Warn** dengan `name`,
+`scope` (`ip`/`user`/`key`), `path`, dan `retry_after_seconds`. Tanpa catatan ini tidak
+ada cara mengetahui ember mana yang ambangnya terlalu ketat di produksi.
 
 ### Storage Backends (Pluggable)
 
