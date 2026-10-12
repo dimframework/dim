@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.14.0] - 2026-10-13
+
 ### Added
 - **`RateLimitConfig.Name`**: Memisahkan ember satu limiter dari limiter lain yang memakai store yang sama. Kuncinya menjadi `ip:<name>:<alamat>` dan `user:<name>:<id>`.
   - Sebelumnya setiap `RateLimit` membentuk kunci `ip:<alamat>` tanpa rute, sehingga semua limiter di atas satu store berbagi satu penghitung per alamat, dan yang menolak adalah ambang limiter yang kebetulan sedang diperiksa. Dua rute berambang berbeda (login 5, donasi 100) berarti 100 donasi dari satu kantor atau satu IP CGNAT mengunci login rekan sekantor — dan refresh sesi (ambang 60) ikut menghabiskan jatah login (ambang 5) di rute yang sama sekali berbeda.
