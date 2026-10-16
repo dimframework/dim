@@ -91,7 +91,7 @@ func UpCreateProductsTable(db dim.Database) error {
             CREATE TABLE IF NOT EXISTS products (
                 id BIGSERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `
     }
@@ -171,8 +171,8 @@ Jika Anda ingin **mengganti** skema tabel-tabel ini (misalnya menggunakan `BIGSE
                     email VARCHAR(255) UNIQUE NOT NULL,
                     name VARCHAR(100),
                     password VARCHAR(255) NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
              `
         }
@@ -183,6 +183,12 @@ Jika Anda ingin **mengganti** skema tabel-tabel ini (misalnya menggunakan `BIGSE
     ```
 
 Dengan cara ini, saat Anda menjalankan `go run . migrate`, framework hanya akan menjalankan migrasi kustom Anda dan mengabaikan versi bawaan.
+
+### Kolom Waktu: Gunakan `TIMESTAMPTZ` di PostgreSQL
+
+Semua kolom waktu tabel bawaan dim bertipe `TIMESTAMPTZ`. Bila Anda mendefinisikan ulang tabelnya, pakai tipe yang sama. Kolom `TIMESTAMP` (tanpa zona) hanya benar selama setiap sesi database berjalan di zona UTC: pgx membuang zona `time.Time` saat menulis, dan `expires_at > NOW()` menafsirkan jam dinding UTC yang tersimpan di zona sesi. Pada sesi `Asia/Jakarta`, token yang dicabut dengan sisa umur satu jam sudah dianggap kedaluwarsa sejak dicabut.
+
+Database yang dimigrasi dengan dim sebelum v0.15.0 dikonversi oleh migrasi bawaan versi 6 (`convert_timestamps_to_timestamptz`) — lihat CHANGELOG untuk detailnya.
 
 ---
 
