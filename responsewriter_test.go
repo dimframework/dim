@@ -39,12 +39,15 @@ func TestLoggerMiddlewarePreservesOptionalInterfaces(t *testing.T) {
 		return got
 	}
 
-	var direct, wrapped caps
+	// probe memanggil Flush, yang mengirim response ke klien sebelum handler
+	// selesai; hasilnya dikirim lewat channel supaya pembacaan di test tidak
+	// berlomba dengan penulisan di goroutine server.
+	directCh, wrappedCh := make(chan caps, 1), make(chan caps, 1)
 
 	r := NewRouter()
-	r.Get("/direct", func(w http.ResponseWriter, _ *http.Request) { direct = probe(w) })
+	r.Get("/direct", func(w http.ResponseWriter, _ *http.Request) { directCh <- probe(w) })
 	r.Group("/logged", LoggerMiddleware(discardLogger())).
-		Get("/wrapped", func(w http.ResponseWriter, _ *http.Request) { wrapped = probe(w) })
+		Get("/wrapped", func(w http.ResponseWriter, _ *http.Request) { wrappedCh <- probe(w) })
 	r.Build()
 
 	srv := httptest.NewServer(r)
@@ -57,6 +60,7 @@ func TestLoggerMiddlewarePreservesOptionalInterfaces(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
+	direct, wrapped := <-directCh, <-wrappedCh
 
 	if direct != wrapped {
 		t.Errorf("antarmuka hilang saat dibungkus:\n  tanpa  logger: %+v\n  dengan logger: %+v", direct, wrapped)
