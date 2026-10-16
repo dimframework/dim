@@ -79,6 +79,10 @@ func (s *GCRARateLimitStore) AllowWithRetryAfter(ctx context.Context, key string
 // ditulis dan tidak dikembalikan, jadi "tidak ada baris" berarti ditolak. Setiap
 // placeholder muncul tepat sekali (lihat DatabaseRateLimitStore.Allow): nilai yang
 // sama dikirim berulang sebagai placeholder terpisah.
+//
+// Placeholder waktu sengaja tanpa cast: tipenya mengikuti kolom expires_at.
+// Cast `::timestamp` atas kolom TIMESTAMPTZ ditafsirkan di zona sesi, sehingga
+// pada sesi selain UTC `now` bergeser sebesar offset-nya.
 func (s *GCRARateLimitStore) allowWithUpsert(ctx context.Context, key string, now time.Time, limit int, window time.Duration) (bool, time.Duration, error) {
 	interval := window / time.Duration(limit)
 	deadline := now.Add(window)
@@ -87,8 +91,8 @@ func (s *GCRARateLimitStore) allowWithUpsert(ctx context.Context, key string, no
 		INSERT INTO rate_limits (key, count, expires_at)
 		VALUES ($1, 0, $2)
 		ON CONFLICT (key) DO UPDATE
-		SET expires_at = GREATEST(rate_limits.expires_at, $3::timestamp) + $4::interval
-		WHERE GREATEST(rate_limits.expires_at, $5::timestamp) + $6::interval <= $7::timestamp
+		SET expires_at = GREATEST(rate_limits.expires_at, $3) + $4::interval
+		WHERE GREATEST(rate_limits.expires_at, $5) + $6::interval <= $7
 		RETURNING expires_at
 	`
 	var newTAT time.Time

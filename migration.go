@@ -136,6 +136,7 @@ func GetFrameworkMigrations() []Migration {
 	migrations = append(migrations, GetUserMigrations()...)
 	migrations = append(migrations, GetTokenMigrations()...)
 	migrations = append(migrations, GetRateLimitMigrations()...)
+	migrations = append(migrations, convertTimestampsToTimestamptzMigration())
 	return migrations
 }
 
@@ -320,7 +321,11 @@ func resolveMigrationsTable(table string) (string, error) {
 	return table, nil
 }
 
-// ensureMigrationsTable creates the migrations history table
+// ensureMigrationsTable creates the migrations history table.
+// On PostgreSQL, a table created before v0.15.0 has its applied_at converted
+// from TIMESTAMP to TIMESTAMPTZ here rather than in a migration: a migration
+// does not know which history table it is being recorded in, and RunMigrationsIn
+// allows any number of them.
 func ensureMigrationsTable(db Database, table string) error {
 	var query string
 	if db.DriverName() == "sqlite" {
@@ -336,11 +341,20 @@ func ensureMigrationsTable(db Database, table string) error {
 			CREATE TABLE IF NOT EXISTS %s (
 				version BIGINT PRIMARY KEY,
 				name VARCHAR(255) NOT NULL,
-				applied_at TIMESTAMP DEFAULT NOW()
+				applied_at TIMESTAMPTZ DEFAULT NOW()
 			)
 		`, table)
 	}
-	return db.Exec(context.Background(), query)
+	ctx := context.Background()
+	if err := db.Exec(ctx, query); err != nil {
+		return err
+	}
+	if db.DriverName() == "sqlite" {
+		return nil
+	}
+	return db.WithTx(ctx, func(ctx context.Context, tx Tx) error {
+		return convertTimeColumns(ctx, tx, table, pgTimestamp, "TIMESTAMPTZ", "applied_at")
+	})
 }
 
 // getAppliedMigrations retrieves all applied migrations

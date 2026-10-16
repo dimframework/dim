@@ -93,12 +93,22 @@ func (p *DatabaseBlocklist) InitSchema(ctx context.Context) error {
 		query = `
 			CREATE UNLOGGED TABLE IF NOT EXISTS token_blocklist (
 				identifier VARCHAR(255) PRIMARY KEY,
-				expires_at TIMESTAMP NOT NULL
+				expires_at TIMESTAMPTZ NOT NULL
 			);
 			CREATE INDEX IF NOT EXISTS idx_token_blocklist_expires_at ON token_blocklist(expires_at);
 		`
 	}
-	return p.db.Exec(ctx, query)
+	if err := p.db.Exec(ctx, query); err != nil {
+		return err
+	}
+	if p.db.DriverName() == "sqlite" {
+		return nil
+	}
+	// Tabel yang dibuat sebelum v0.15.0 masih TIMESTAMP; lihat
+	// convertTimestampsToTimestamptzMigration.
+	return p.db.WithTx(ctx, func(ctx context.Context, tx Tx) error {
+		return convertTimeColumns(ctx, tx, "token_blocklist", pgTimestamp, "TIMESTAMPTZ", "expires_at")
+	})
 }
 
 func (p *DatabaseBlocklist) Invalidate(ctx context.Context, identifier string, expiresIn time.Duration) error {

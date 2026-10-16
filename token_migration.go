@@ -53,9 +53,9 @@ func CreateRefreshTokensTable(db Database) error {
 				token_hash VARCHAR(255) UNIQUE NOT NULL,
 				user_agent TEXT NOT NULL,
 				ip_address VARCHAR(45) NOT NULL,
-				expires_at TIMESTAMP NOT NULL,
-				created_at TIMESTAMP DEFAULT NOW(),
-				revoked_at TIMESTAMP
+				expires_at TIMESTAMPTZ NOT NULL,
+				created_at TIMESTAMPTZ DEFAULT NOW(),
+				revoked_at TIMESTAMPTZ
 			)
 		`
 	}
@@ -91,9 +91,9 @@ func CreatePasswordResetTokensTable(db Database) error {
 				id BIGSERIAL PRIMARY KEY,
 				user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 				token_hash VARCHAR(255) UNIQUE NOT NULL,
-				expires_at TIMESTAMP NOT NULL,
-				used_at TIMESTAMP,
-				created_at TIMESTAMP DEFAULT NOW()
+				expires_at TIMESTAMPTZ NOT NULL,
+				used_at TIMESTAMPTZ,
+				created_at TIMESTAMPTZ DEFAULT NOW()
 			)
 		`
 	}
@@ -124,7 +124,7 @@ func CreateTokenBlocklistTable(db Database) error {
 		query = `
 			CREATE UNLOGGED TABLE IF NOT EXISTS token_blocklist (
 				identifier VARCHAR(255) PRIMARY KEY,
-				expires_at TIMESTAMP NOT NULL
+				expires_at TIMESTAMPTZ NOT NULL
 			);
 			CREATE INDEX IF NOT EXISTS idx_token_blocklist_expires_at ON token_blocklist(expires_at);
 		`

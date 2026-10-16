@@ -76,6 +76,7 @@ func (s *DatabaseTokenStore) SaveRefreshToken(ctx context.Context, token *Refres
 		return fmt.Errorf("failed to save refresh token: %w", err)
 	}
 
+	token.CreatedAt = token.CreatedAt.UTC()
 	return nil
 }
 
@@ -94,6 +95,9 @@ func (s *DatabaseTokenStore) FindRefreshToken(ctx context.Context, tokenHash str
 		return nil, fmt.Errorf("failed to find refresh token: %w", err)
 	}
 
+	token.ExpiresAt = token.ExpiresAt.UTC()
+	token.CreatedAt = token.CreatedAt.UTC()
+	token.RevokedAt = utcPtr(token.RevokedAt)
 	return token, nil
 }
 
@@ -141,6 +145,7 @@ func (s *DatabaseTokenStore) SavePasswordResetToken(ctx context.Context, token *
 		return fmt.Errorf("failed to save password reset token: %w", err)
 	}
 
+	token.CreatedAt = token.CreatedAt.UTC()
 	return nil
 }
 
@@ -158,6 +163,9 @@ func (s *DatabaseTokenStore) FindPasswordResetToken(ctx context.Context, tokenHa
 		return nil, fmt.Errorf("failed to find password reset token: %w", err)
 	}
 
+	token.ExpiresAt = token.ExpiresAt.UTC()
+	token.CreatedAt = token.CreatedAt.UTC()
+	token.UsedAt = utcPtr(token.UsedAt)
 	return token, nil
 }
 
@@ -249,4 +257,15 @@ func (s *MockTokenStore) MarkPasswordResetUsed(ctx context.Context, tokenHash st
 		token.UsedAt = &now
 	}
 	return nil
+}
+
+// utcPtr mengembalikan t dalam UTC. pgx memindai TIMESTAMPTZ ke time.Local;
+// store mengembalikan UTC, sama seperti saat kolomnya masih TIMESTAMP, supaya
+// JSON-nya tidak bersufiks offset mesin.
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }

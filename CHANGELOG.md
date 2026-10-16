@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Kolom waktu tabel bawaan kini `TIMESTAMPTZ` di PostgreSQL**: 11 kolom di `users`, `refresh_tokens`, `password_reset_tokens`, `token_blocklist`, `rate_limits`, dan `applied_at` tabel pencatat migrasi sebelumnya `TIMESTAMP` tanpa zona, sehingga kebenarannya bergantung pada zona sesi database. Closes [#27](https://github.com/dimframework/dim/issues/27).
+  - pgx membuang zona `time.Time` saat menulis ke kolom tanpa zona, dan `expires_at > NOW()` menafsirkan jam dinding UTC yang tersimpan di zona sesi. Pada sesi selain UTC, `DatabaseBlocklist.IsRevoked` menganggap token kedaluwarsa lebih awal sebesar offset sesi — pada `Asia/Jakarta`, token yang dicabut dengan sisa umur di bawah 7 jam **langsung diterima lagi**. Aplikasi selama ini harus memasang `RuntimeParams["timezone"] = "UTC"` agar aman.
+  - **Migrasi bawaan versi 6 (`convert_timestamps_to_timestamptz`)** mengonversi database yang sudah ada dengan `ALTER COLUMN … TYPE timestamptz USING col AT TIME ZONE 'UTC'`, yang mempertahankan instannya. Hanya kolom yang masih `TIMESTAMP` yang disentuh, jadi migrasinya tidak berefek pada database baru dan aman dijalankan ulang; tabel yang tidak ada dilewati; semua tabel dikonversi dalam satu transaksi. `Down` mengembalikannya ke jam dinding UTC. Tidak berefek di SQLite.
+  - `applied_at` dikonversi oleh `RunMigrationsIn` saat memastikan tabel pencatatnya ada, bukan oleh migrasi versi 6: migrasi tidak tahu di tabel pencatat mana ia dicatat, dan `RunMigrationsIn` mengizinkan banyak. `DatabaseBlocklist.InitSchema` dan `DatabaseRateLimitStore.InitSchema` / `GCRARateLimitStore.InitSchema` ikut mengonversi tabelnya, bagi aplikasi yang memakainya alih-alih migrasi.
+  - **`GCRARateLimitStore` tidak lagi meng-cast placeholder waktunya ke `::timestamp`**. Atas kolom `TIMESTAMPTZ`, cast itu ditafsirkan di zona sesi, sehingga pada sesi selain UTC semua request sesudah yang pertama ditolak. Tanpa cast, tipenya mengikuti kolom — benar atas `TIMESTAMPTZ` maupun `TIMESTAMP` lama, di protokol extended maupun simple.
+  - `DatabaseTokenStore` mengembalikan waktu dalam UTC seperti sebelumnya. pgx memindai `TIMESTAMPTZ` ke `time.Local`; tanpa normalisasi, JSON `RefreshToken`/`PasswordResetToken` akan bersufiks offset mesin.
+  - **Perlu diperhatikan saat memperbarui:**
+    - Konversinya mengasumsikan nilai lama adalah jam dinding UTC, yang benar untuk semua yang ditulis store dim. Nilai yang berasal dari `DEFAULT NOW()` — `users.created_at`/`updated_at` bila aplikasi tidak mengisinya sendiri, dan `migrations.applied_at` — tersimpan sebagai jam dinding **zona sesi saat ditulis**; bila sesi itu bukan UTC, nilainya bergeser sebesar offset-nya dan perlu dikoreksi manual.
+    - `ALTER COLUMN … TYPE` menulis ulang tabelnya di bawah `ACCESS EXCLUSIVE` lock. Pada tabel `users` yang besar, jalankan migrasinya di luar jam sibuk.
+    - PostgreSQL menolak mengubah tipe kolom yang dipakai view atau rule. Bila aplikasi punya view atas kolom-kolom di atas, migrasi versi 6 gagal sampai view-nya di-drop dan dibuat ulang.
+    - Versi 6 bertabrakan dengan migrasi aplikasi yang memakai versi integer `6` (bukan timestamp `YYYYMMDDHHMMSS`): versi yang sudah tercatat dianggap sudah dijalankan, sehingga konversinya terlewat tanpa suara.
+    - Aplikasi yang memindai kolom-kolom ini sendiri akan menerima `time.Local`, bukan UTC. Instannya sama; normalkan dengan `.UTC()` bila keluarannya diserialisasi.
+
 ---
 
 ## [v0.14.0] - 2026-10-13
