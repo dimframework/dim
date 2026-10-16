@@ -12,7 +12,7 @@ type contextKey string
 const (
 	userKey      contextKey = "user"
 	requestIDKey contextKey = "request_id"
-	paramsKey    contextKey = "params"
+	routeKey     contextKey = "route"
 	clientIPKey  contextKey = "client_ip"
 )
 
@@ -155,14 +155,77 @@ type routeParams struct {
 	vals []string
 }
 
-// setRouteParams stores captured URL params into the request context.
-func setRouteParams(r *http.Request, params *routeParams) *http.Request {
-	ctx := context.WithValue(r.Context(), paramsKey, params)
-	return r.WithContext(ctx)
+// routeMatch records what the router matched for one request.
+//
+// The router installs it before the global middleware chain runs and fills it
+// in once a route is found, so middleware registered with Router.Use can read
+// the matched pattern after next returns — the point where metrics and access
+// logs are written. A value placed in the context during dispatch would only
+// be visible downstream of the router, never to the middleware wrapping it.
+//
+// The buffers back params for up to four parameters, which covers most routes
+// without a separate allocation.
+type routeMatch struct {
+	pattern string
+	params  routeParams
+	keysBuf [4]string
+	valsBuf [4]string
+	parent  *routeMatch // match of an enclosing Router when routers are nested
+}
+
+// withRouteMatch returns req carrying a fresh, empty routeMatch.
+func withRouteMatch(req *http.Request) (*http.Request, *routeMatch) {
+	m := &routeMatch{parent: routeMatchFrom(req)}
+	m.params.keys = m.keysBuf[:0]
+	m.params.vals = m.valsBuf[:0]
+	return req.WithContext(context.WithValue(req.Context(), routeKey, m)), m
+}
+
+// routeMatchFrom returns the routeMatch installed by the router, or nil when
+// the request never passed through Router.ServeHTTP.
+func routeMatchFrom(r *http.Request) *routeMatch {
+	m, _ := r.Context().Value(routeKey).(*routeMatch)
+	return m
+}
+
+// GetRoutePattern mengembalikan pola rute yang cocok dengan request, persis
+// seperti saat didaftarkan — termasuk prefix Group — misalnya "/users/{id}"
+// untuk request ke /users/42.
+//
+// Dapat dibaca dari handler, dari middleware rute, dan dari middleware global
+// (Router.Use) setelah next kembali. Gunakan nilai ini, bukan r.URL.Path,
+// sebagai label metrik (satu deret per rute, bukan per nilai parameter) dan
+// saat mencatat rute yang membawa rahasia di path-nya, seperti /reset/{token}.
+//
+// Mengembalikan string kosong bila tidak ada rute yang cocok (404, 405,
+// redirect trailing slash), bila request dilayani Static/SPA, dan bila request
+// tidak melewati Router sama sekali.
+//
+// Parameters:
+//   - r: *http.Request request yang di-check
+//
+// Returns:
+//   - string: pola rute yang cocok, empty string jika tidak ada
+//
+// Example:
+//
+//	func Metrics(next dim.HandlerFunc) dim.HandlerFunc {
+//		return func(w http.ResponseWriter, r *http.Request) {
+//			start := time.Now()
+//			next(w, r)
+//			route := dim.GetRoutePattern(r) // "/users/{id}"
+//			requestDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
+//		}
+//	}
+func GetRoutePattern(r *http.Request) string {
+	if m := routeMatchFrom(r); m != nil {
+		return m.pattern
+	}
+	return ""
 }
 
 // GetParam mengambil single path parameter dari request.
-// Membaca dari routeParams context (radix tree) dengan fallback ke r.PathValue()
+// Membaca parameter yang ditangkap radix tree dengan fallback ke r.PathValue()
 // untuk route yang dilayani langsung oleh http.ServeMux (Static/SPA).
 // Returns empty string jika parameter tidak ditemukan.
 //
@@ -178,13 +241,19 @@ func setRouteParams(r *http.Request, params *routeParams) *http.Request {
 //	// Route: GET /users/{id}
 //	userID := GetParam(req, "id")
 func GetParam(r *http.Request, key string) string {
-	if rp, ok := r.Context().Value(paramsKey).(*routeParams); ok {
+	// With nested routers, the innermost router that captured params answers.
+	for m := routeMatchFrom(r); m != nil; m = m.parent {
+		rp := &m.params
+		if len(rp.keys) == 0 {
+			continue
+		}
 		// Reverse iteration: last-added value wins (supports nested groups).
 		for i := len(rp.keys) - 1; i >= 0; i-- {
 			if rp.keys[i] == key {
 				return rp.vals[i]
 			}
 		}
+		break
 	}
 	// Fallback for mux-served routes (Static, SPA).
 	return r.PathValue(key)

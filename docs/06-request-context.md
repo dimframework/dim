@@ -119,6 +119,30 @@ func getUserPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### Membaca Pola Rute yang Cocok
+
+`dim.GetRoutePattern(r)` (atau `ctx.RoutePattern()`) mengembalikan pola rute persis seperti saat didaftarkan, termasuk prefix `Group` — `/users/{id}` untuk request ke `/users/42`. Rute statis mengembalikan dirinya sendiri (`/health`).
+
+Pakai nilai ini, bukan `r.URL.Path`, untuk dua hal:
+
+- **Label metrik.** `r.URL.Path` melahirkan satu deret per nilai parameter (`/users/1`, `/users/2`, …); polanya memberi satu deret per rute.
+- **Mencatat rute yang membawa rahasia di path-nya.** `/reset/{token}` dapat dicatat tanpa nilai token-nya.
+
+Pola ini dapat dibaca dari middleware global (`router.Use`) **setelah `next` kembali** — sebelum `next`, rutenya belum dicocokkan:
+
+```go
+func Metrics(next dim.HandlerFunc) dim.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next(w, r)
+        route := dim.GetRoutePattern(r) // "" untuk 404, 405, redirect, Static/SPA
+        requestDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
+    }
+}
+```
+
+String kosong berarti tidak ada rute terdaftar yang melayani request: 404, 405, redirect trailing slash, file dari `Static`/`SPA`, atau request yang tidak melewati `Router`.
+
 ---
 
 ## Query Parameters
