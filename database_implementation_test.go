@@ -10,6 +10,17 @@ import (
 // newTestPostgresDB creates a PostgresDatabase from env vars, or skips the test.
 func newTestPostgresDB(t *testing.T) *PostgresDatabase {
 	t.Helper()
+	db, err := NewPostgresDatabase(testPostgresConfig(t))
+	if err != nil {
+		t.Fatalf("NewPostgresDatabase: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// testPostgresConfig builds a DatabaseConfig from env vars, or skips the test.
+func testPostgresConfig(t *testing.T) DatabaseConfig {
+	t.Helper()
 	host := os.Getenv("TEST_PG_HOST")
 	if host == "" {
 		t.Skip("TEST_PG_HOST not set — skipping Postgres integration test")
@@ -24,12 +35,7 @@ func newTestPostgresDB(t *testing.T) *PostgresDatabase {
 		SSLMode:   "disable",
 		MaxConns:  2,
 	}
-	db, err := NewPostgresDatabase(cfg)
-	if err != nil {
-		t.Fatalf("NewPostgresDatabase: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return cfg
 }
 
 func TestPostgresDatabase_WritePool(t *testing.T) {

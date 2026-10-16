@@ -32,8 +32,8 @@ func GetUserMigrations() []Migration {
 							email VARCHAR(255) UNIQUE NOT NULL,
 							name VARCHAR(100),
 							password VARCHAR(255) NOT NULL,
-							created_at TIMESTAMP DEFAULT NOW(),
-							updated_at TIMESTAMP DEFAULT NOW()
+							created_at TIMESTAMPTZ DEFAULT NOW(),
+							updated_at TIMESTAMPTZ DEFAULT NOW()
 						);
 						CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 					`
