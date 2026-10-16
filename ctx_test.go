@@ -2,7 +2,6 @@ package dim
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,8 +35,8 @@ func TestOf(t *testing.T) {
 
 func TestCtx_Param(t *testing.T) {
 	w, r := newCtxRequest(http.MethodGet, "/users/42", "")
-	rp := &routeParams{keys: []string{"id"}, vals: []string{"42"}}
-	r = r.WithContext(context.WithValue(r.Context(), paramsKey, rp))
+	r, m := withRouteMatch(r)
+	m.params = routeParams{keys: []string{"id"}, vals: []string{"42"}}
 
 	c := Of(w, r)
 	if got := c.Param("id"); got != "42" {

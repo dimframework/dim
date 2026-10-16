@@ -393,7 +393,7 @@ func (r *Router) Register(method, path string, handler HandlerFunc, middleware [
 		r.staticRoutes[path].handlers[method] = finalHandler
 	} else {
 		// Radix tree for paths with URL parameters.
-		r.tree.insert(path, method, finalHandler)
+		r.tree.insert(path, path, method, finalHandler)
 	}
 
 	// Track route info for CLI introspection.
@@ -427,9 +427,17 @@ func (r *Router) serveTree(w http.ResponseWriter, req *http.Request) {
 	// 1. Static map — O(1) lookup for parameter-free routes.
 	// A path registered under a different method is only a 405 candidate: a
 	// tree route may still handle this method, so the search continues.
+	// m is nil only when serveTree is reached without ServeHTTP; it then gets
+	// a routeMatch of its own so handlers can still read params and pattern.
+	m := routeMatchFrom(req)
 	var allowed []string
 	if entry, ok := r.staticRoutes[path]; ok {
 		if h, ok := entry.handlers[method]; ok {
+			if m == nil {
+				req, m = withRouteMatch(req)
+			}
+			// The static map is keyed by the registered pattern itself.
+			m.pattern = path
 			h(w, req)
 			return
 		}
@@ -439,12 +447,13 @@ func (r *Router) serveTree(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 2. Radix tree — O(k) for routes with {param} or {path...}.
-	h, params, treeAllowed, found := r.tree.match(method, path)
+	if m == nil {
+		req, m = withRouteMatch(req)
+	}
+	ep, treeAllowed, found := r.tree.match(method, path, &m.params)
 	if found {
-		if params != nil && len(params.keys) > 0 {
-			req = setRouteParams(req, params)
-		}
-		h(w, req)
+		m.pattern = ep.pattern
+		ep.handler(w, req)
 		return
 	}
 	allowed = append(allowed, treeAllowed...)
@@ -493,7 +502,7 @@ func (r *Router) trailingSlashCounterpart(method, path string) (string, bool) {
 		// The static map holds this path under other methods only; a tree route
 		// may still cover it, so fall through instead of giving up here.
 	}
-	if _, _, _, found := r.tree.match(method, counterpart); found {
+	if _, _, found := r.tree.match(method, counterpart, &routeParams{}); found {
 		return counterpart, true
 	}
 	return "", false
@@ -547,12 +556,17 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // buildHandler membuat handler chain dengan middleware global.
+// routeMatch dipasang sebelum middleware global berjalan, sehingga middleware
+// tersebut dapat membaca GetRoutePattern setelah next kembali.
 func (r *Router) buildHandler() http.Handler {
-	base := HandlerFunc(r.serveTree)
+	h := HandlerFunc(r.serveTree)
 	if len(r.middleware) > 0 {
-		return Chain(base, r.middleware...)
+		h = Chain(h, r.middleware...)
 	}
-	return base
+	return HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		req, _ = withRouteMatch(req)
+		h(w, req)
+	})
 }
 
 // GetRoutes mengembalikan semua route yang terdaftar dengan caching.
