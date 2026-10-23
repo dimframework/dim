@@ -118,12 +118,22 @@ func (s *DatabaseRateLimitStore) InitSchema(ctx context.Context) error {
 			CREATE UNLOGGED TABLE IF NOT EXISTS rate_limits (
 				key VARCHAR(255) PRIMARY KEY,
 				count INT NOT NULL DEFAULT 0,
-				expires_at TIMESTAMP NOT NULL
+				expires_at TIMESTAMPTZ NOT NULL
 			);
 			CREATE INDEX IF NOT EXISTS idx_rate_limits_expires_at ON rate_limits(expires_at);
 		`
 	}
-	return s.db.Exec(ctx, query)
+	if err := s.db.Exec(ctx, query); err != nil {
+		return err
+	}
+	if s.db.DriverName() == "sqlite" {
+		return nil
+	}
+	// Tabel yang dibuat sebelum v0.15.0 masih TIMESTAMP; lihat
+	// convertTimestampsToTimestamptzMigration.
+	return s.db.WithTx(ctx, func(ctx context.Context, tx Tx) error {
+		return convertTimeColumns(ctx, tx, "rate_limits", pgTimestamp, "TIMESTAMPTZ", "expires_at")
+	})
 }
 
 // Allow mengecek dan menaikkan limit menggunakan Atomic UPSERT.
