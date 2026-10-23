@@ -14,9 +14,11 @@ const (
 	ntCatchAll                // {path...}
 )
 
-// treeEndpoint holds the handler for a specific HTTP method.
+// treeEndpoint holds the handler for a specific HTTP method, together with the
+// full pattern it was registered under so GetRoutePattern can report it.
 type treeEndpoint struct {
 	handler HandlerFunc
+	pattern string
 }
 
 // treeNode is a node in the radix tree.
@@ -44,20 +46,22 @@ func newTreeNode(typ nodeTyp, prefix string) *treeNode {
 }
 
 // insert adds a route pattern + method + handler into the subtree rooted at n.
-func (n *treeNode) insert(pattern, method string, handler HandlerFunc) {
+// pattern is consumed piece by piece as the recursion descends, so by the time
+// it is empty only full — the pattern as registered — still holds the route.
+func (n *treeNode) insert(pattern, full, method string, handler HandlerFunc) {
 	if pattern == "" {
-		n.endpoints[method] = &treeEndpoint{handler: handler}
+		n.endpoints[method] = &treeEndpoint{handler: handler, pattern: full}
 		return
 	}
 	if pattern[0] == '{' {
-		n.insertParam(pattern, method, handler)
+		n.insertParam(pattern, full, method, handler)
 		return
 	}
-	n.insertStatic(pattern, method, handler)
+	n.insertStatic(pattern, full, method, handler)
 }
 
 // insertStatic handles a static prefix segment during insert.
-func (n *treeNode) insertStatic(pattern, method string, handler HandlerFunc) {
+func (n *treeNode) insertStatic(pattern, full, method string, handler HandlerFunc) {
 	// Identify the static portion: everything up to the first '{'.
 	end := strings.IndexByte(pattern, '{')
 	staticPart := pattern
@@ -76,7 +80,7 @@ func (n *treeNode) insertStatic(pattern, method string, handler HandlerFunc) {
 
 		if lcp == len(c.prefix) {
 			// Existing prefix fully consumed — recurse with remainder of pattern.
-			c.insert(pattern[lcp:], method, handler)
+			c.insert(pattern[lcp:], full, method, handler)
 			return
 		}
 
@@ -90,18 +94,18 @@ func (n *treeNode) insertStatic(pattern, method string, handler HandlerFunc) {
 		n.children[ntStatic][i] = inter
 
 		// Continue insert of the remaining new pattern into the split node.
-		inter.insert(pattern[lcp:], method, handler)
+		inter.insert(pattern[lcp:], full, method, handler)
 		return
 	}
 
 	// No compatible child found — create a new static node.
 	child := newTreeNode(ntStatic, staticPart)
 	n.children[ntStatic] = append(n.children[ntStatic], child)
-	child.insert(pattern[len(staticPart):], method, handler)
+	child.insert(pattern[len(staticPart):], full, method, handler)
 }
 
 // insertParam handles a '{...}' segment during insert.
-func (n *treeNode) insertParam(pattern, method string, handler HandlerFunc) {
+func (n *treeNode) insertParam(pattern, full, method string, handler HandlerFunc) {
 	end := strings.IndexByte(pattern, '}')
 	if end < 0 {
 		panic("dim: malformed route pattern — missing '}'")
@@ -121,7 +125,7 @@ func (n *treeNode) insertParam(pattern, method string, handler HandlerFunc) {
 	// Reuse an existing child with the same key.
 	for _, c := range n.children[childTyp] {
 		if c.paramKey == key {
-			c.insert(pattern[end+1:], method, handler)
+			c.insert(pattern[end+1:], full, method, handler)
 			return
 		}
 	}
@@ -129,26 +133,29 @@ func (n *treeNode) insertParam(pattern, method string, handler HandlerFunc) {
 	child := newTreeNode(childTyp, pattern[:end+1])
 	child.paramKey = key
 	n.children[childTyp] = append(n.children[childTyp], child)
-	child.insert(pattern[end+1:], method, handler)
+	child.insert(pattern[end+1:], full, method, handler)
 }
 
-// match finds the handler and URL params for the given method+path.
-// Returns (handler, params, allowedMethods, found).
+// match finds the endpoint and URL params for the given method+path.
+// Returns (endpoint, allowedMethods, found). Matched params are written into
+// params, whose slices are reset first and reused if they have capacity — the
+// router hands in buffers that live in the per-request routeMatch.
 // allowedMethods is non-empty when the path exists but the method is not
 // registered (→ 405). It is returned unsorted and possibly with duplicates so
 // the caller can merge it with candidates of its own; joinAllowedMethods turns
 // it into the header value.
-// Pre-allocates slices with capacity 4 (covers most real-world param counts without growing).
-func (n *treeNode) match(method, path string) (HandlerFunc, *routeParams, []string, bool) {
-	keys := make([]string, 0, 4)
-	vals := make([]string, 0, 4)
+func (n *treeNode) match(method, path string, params *routeParams) (*treeEndpoint, []string, bool) {
+	params.keys = params.keys[:0]
+	params.vals = params.vals[:0]
 	var allowed []string // stays nil unless a 405 candidate is found
 
-	h, found := n.matchInternal(method, path, &keys, &vals, &allowed)
+	ep, found := n.matchInternal(method, path, &params.keys, &params.vals, &allowed)
 	if found {
-		return h, &routeParams{keys: keys, vals: vals}, nil, true
+		return ep, nil, true
 	}
-	return nil, nil, allowed, false
+	params.keys = params.keys[:0]
+	params.vals = params.vals[:0]
+	return nil, allowed, false
 }
 
 // matchInternal is the recursive worker for match.
@@ -158,7 +165,7 @@ func (n *treeNode) match(method, path string) (HandlerFunc, *routeParams, []stri
 // the search: its methods are collected into *allowed and only reported when no
 // branch at all produces a handler. Otherwise such a branch would mask a sibling
 // branch that does handle the method.
-func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]string) (HandlerFunc, bool) {
+func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]string) (*treeEndpoint, bool) {
 	if path != "" {
 		// 1. Static children — try each child whose label matches path[0].
 		label := path[0]
@@ -169,8 +176,8 @@ func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]str
 			if !strings.HasPrefix(path, c.prefix) {
 				continue
 			}
-			if h, found := c.matchInternal(method, path[len(c.prefix):], keys, vals, allowed); found {
-				return h, true
+			if ep, found := c.matchInternal(method, path[len(c.prefix):], keys, vals, allowed); found {
+				return ep, true
 			}
 		}
 
@@ -186,8 +193,8 @@ func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]str
 					prev := len(*keys)
 					*keys = append(*keys, c.paramKey)
 					*vals = append(*vals, val)
-					if h, found := c.matchInternal(method, remaining, keys, vals, allowed); found {
-						return h, true
+					if ep, found := c.matchInternal(method, remaining, keys, vals, allowed); found {
+						return ep, true
 					}
 					// Backtrack.
 					*keys = (*keys)[:prev]
@@ -204,7 +211,7 @@ func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]str
 		*vals = append(*vals, path)
 
 		if ep, ok := c.endpoints[method]; ok {
-			return ep.handler, true
+			return ep, true
 		}
 		// Backtrack.
 		*keys = (*keys)[:prev]
@@ -217,7 +224,7 @@ func (n *treeNode) matchInternal(method, path string, keys, vals, allowed *[]str
 	// e.g. /m/{slug} serving /m/abc/x/y/z.
 	if path == "" {
 		if ep, ok := n.endpoints[method]; ok {
-			return ep.handler, true
+			return ep, true
 		}
 		collectAllowedMethods(allowed, n.endpoints)
 	}

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`GetRoutePattern(r)` / `Ctx.RoutePattern()`**: Mengembalikan pola rute yang cocok persis seperti saat didaftarkan, termasuk prefix `Group` — `/users/{id}` untuk request ke `/users/42`, `/health` untuk rute statis, `/files/{path...}` untuk catch-all. String kosong bila tidak ada rute yang melayani request (404, 405, redirect trailing slash, `Static`/`SPA`). Closes [#26](https://github.com/dimframework/dim/issues/26).
+  - Sebelumnya router membuang polanya setelah membangun pohon, sehingga label metrik per-rute dan pencatatan rute yang membawa rahasia di path-nya (`/reset/{token}`) hanya bisa dikerjakan dengan menjahit ulang polanya sebagai closure di tiap pendaftaran — duplikasi yang dapat berbeda dari pola sebenarnya tanpa satu pun galat.
+  - **Terbaca dari middleware global setelah `next` kembali.** Middleware metrik dan access log biasanya dipasang lewat `router.Use` dan menulis sesudah handler selesai, di luar dispatch router. Nilai yang dipasang ke context saat dispatch tidak akan pernah terlihat di sana, jadi router kini memasang satu wadah per request *sebelum* middleware global berjalan, lalu mengisinya saat rute ditemukan.
+  - Rute statis (peta O(1)) dan rute pohon sama-sama mengisi polanya; rute statis selama ini tidak menulis apa pun ke context.
+  - **Biaya per request**: wadah itu menuntut satu `r.WithContext` per request. Rute statis yang sebelumnya 0 alokasi kini 3 alokasi (~33 ns → ~420 ns pada `BenchmarkAfter_StaticRoute`). Rute berparameter turun dari 5 ke 3 alokasi, karena buffer parameternya kini menumpang di wadah yang sama — waktunya tidak berubah berarti.
+  - Perilaku `GetParam` tidak berubah, termasuk pada router dim yang dipasang di dalam router dim lain: router terdalam yang menangkap parameter yang menjawab.
+
 ---
 
 ## [v0.14.0] - 2026-10-13

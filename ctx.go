@@ -19,6 +19,12 @@ func (c *Ctx) Param(key string) string {
 	return GetParam(c.r, key)
 }
 
+// RoutePattern mengembalikan pola rute yang cocok, misalnya "/users/{id}".
+// Lihat GetRoutePattern.
+func (c *Ctx) RoutePattern() string {
+	return GetRoutePattern(c.r)
+}
+
 func (c *Ctx) Query(key string) string {
 	return GetQueryParam(c.r, key)
 }

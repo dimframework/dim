@@ -109,6 +109,10 @@ Menyimpan pengguna ke konteks.
 `func GetParam(r *http.Request, key string) string`
 Mengambil satu parameter jalur (path).
 
+### GetRoutePattern
+`func GetRoutePattern(r *http.Request) string`
+Mengembalikan pola rute yang cocok (`/users/{id}`), atau string kosong bila tidak ada rute yang melayani request. Dapat dibaca dari middleware global setelah `next` kembali.
+
 ### GetQueryParams
 `func GetQueryParams(r *http.Request, keys ...string) map[string]string`
 Mengambil beberapa parameter kueri.
