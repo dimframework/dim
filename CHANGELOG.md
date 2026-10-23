@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v0.15.0] - 2026-10-23
+
 ### Added
 - **`GetRoutePattern(r)` / `Ctx.RoutePattern()`**: Mengembalikan pola rute yang cocok persis seperti saat didaftarkan, termasuk prefix `Group` — `/users/{id}` untuk request ke `/users/42`, `/health` untuk rute statis, `/files/{path...}` untuk catch-all. String kosong bila tidak ada rute yang melayani request (404, 405, redirect trailing slash, `Static`/`SPA`). Closes [#26](https://github.com/dimframework/dim/issues/26).
   - Sebelumnya router membuang polanya setelah membangun pohon, sehingga label metrik per-rute dan pencatatan rute yang membawa rahasia di path-nya (`/reset/{token}`) hanya bisa dikerjakan dengan menjahit ulang polanya sebagai closure di tiap pendaftaran — duplikasi yang dapat berbeda dari pola sebenarnya tanpa satu pun galat.
@@ -23,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`GCRARateLimitStore` tidak lagi meng-cast placeholder waktunya ke `::timestamp`**. Atas kolom `TIMESTAMPTZ`, cast itu ditafsirkan di zona sesi, sehingga pada sesi selain UTC semua request sesudah yang pertama ditolak. Tanpa cast, tipenya mengikuti kolom — benar atas `TIMESTAMPTZ` maupun `TIMESTAMP` lama, di protokol extended maupun simple.
   - `DatabaseTokenStore` mengembalikan waktu dalam UTC seperti sebelumnya. pgx memindai `TIMESTAMPTZ` ke `time.Local`; tanpa normalisasi, JSON `RefreshToken`/`PasswordResetToken` akan bersufiks offset mesin.
   - **Perlu diperhatikan saat memperbarui:**
+    - Jalankan `migrate` (atau `RunMigrations`) sesudah memperbarui. Sebelum migrasi versi 6 berjalan, kolomnya masih `TIMESTAMP` dan perilakunya sama seperti v0.14.0.
+    - Sesudah konversi, `RuntimeParams["timezone"] = "UTC"` tidak lagi diperlukan demi kebenaran tabel bawaan dim. Kalau aplikasi memasangnya hanya karena alasan itu, pengaturannya boleh dicabut. Kalau kolom `TIMESTAMP` milik aplikasi sendiri masih bergantung padanya, pertahankan.
     - Konversinya mengasumsikan nilai lama adalah jam dinding UTC, yang benar untuk semua yang ditulis store dim. Nilai yang berasal dari `DEFAULT NOW()` — `users.created_at`/`updated_at` bila aplikasi tidak mengisinya sendiri, dan `migrations.applied_at` — tersimpan sebagai jam dinding **zona sesi saat ditulis**; bila sesi itu bukan UTC, nilainya bergeser sebesar offset-nya dan perlu dikoreksi manual.
     - `ALTER COLUMN … TYPE` menulis ulang tabelnya di bawah `ACCESS EXCLUSIVE` lock. Pada tabel `users` yang besar, jalankan migrasinya di luar jam sibuk.
     - PostgreSQL menolak mengubah tipe kolom yang dipakai view atau rule. Bila aplikasi punya view atas kolom-kolom di atas, migrasi versi 6 gagal sampai view-nya di-drop dan dibuat ulang.
